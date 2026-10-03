@@ -18,6 +18,10 @@ Thumbs.db
 # Generated outputs (keep examples/)
 *.vesta
 /output/
+ppt_output/
+
+# Machine-specific Windows shortcut
+*.lnk
 
 # Local scratch / source note
 说明.txt

@@ -1,0 +1,5 @@
+# 运行 GUI 与生成 PPT 所需依赖
+PySide6>=6.5
+python-pptx>=1.0
+Pillow>=9.0
+numpy>=1.21
