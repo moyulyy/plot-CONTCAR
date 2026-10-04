@@ -1127,11 +1127,17 @@ class MainWindow(QWidget):
         b_up.clicked.connect(lambda: self._move_row(-1))
         b_dn = self._pill("↓ 下移", "outline", height=28)
         b_dn.clicked.connect(lambda: self._move_row(1))
+        b_top = self._pill("⤒ 置顶", "outline", height=28)
+        b_top.clicked.connect(lambda: self._move_to(False))
+        b_bot = self._pill("⤓ 置底", "outline", height=28)
+        b_bot.clicked.connect(lambda: self._move_to(True))
         tool_row.addWidget(b_all)
         tool_row.addWidget(b_none)
         tool_row.addWidget(b_ref)
         tool_row.addWidget(b_up)
         tool_row.addWidget(b_dn)
+        tool_row.addWidget(b_top)
+        tool_row.addWidget(b_bot)
         tool_row.addStretch(1)
         self.scan_info = QLabel("尚未检索")
         self.scan_info.setObjectName("HintLabel")
@@ -1420,6 +1426,28 @@ class MainWindow(QWidget):
         a, b = self._row_data(r), self._row_data(nr)
         self._set_row_data(r, b)
         self._set_row_data(nr, a)
+        self.file_table.setCurrentCell(nr, 1)
+        self.file_table.selectRow(nr)
+
+    def _move_to(self, to_end):
+        """把选中行直接放到最前(to_end=False) / 最后(to_end=True)。"""
+        r = self.file_table.currentRow()
+        if r < 0:
+            QMessageBox.information(self, "提示", "请先选中要移动的一行。")
+            return
+        n = self.file_table.rowCount()
+        if n <= 1:
+            return
+        rows = [self._row_data(i) for i in range(n)]
+        item = rows.pop(r)
+        if to_end:
+            rows.append(item)
+        else:
+            rows.insert(0, item)
+        self.file_table.setSortingEnabled(False)
+        for i, d in enumerate(rows):
+            self._set_row_data(i, d)
+        nr = n - 1 if to_end else 0
         self.file_table.setCurrentCell(nr, 1)
         self.file_table.selectRow(nr)
 
