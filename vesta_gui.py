@@ -69,6 +69,7 @@ from PySide6.QtWidgets import (
     QProgressBar, QPlainTextEdit, QFileDialog, QMessageBox, QColorDialog,
     QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QAbstractButton, QGraphicsDropShadowEffect, QSizePolicy,
+    QRadioButton, QButtonGroup,
 )
 
 # 复用核心工具
@@ -543,7 +544,7 @@ def add_legend_slide(prs, blank, legend, s):
 # ---------------------------------------------------------------------------
 # 批量处理（无界面依赖）
 # ---------------------------------------------------------------------------
-def run_batch(s, log, progress, stop_event):
+def run_batch(s, log, progress, stop_event, pause_event=None):
     """执行批量出图 + PPT 生成。log(level,msg) / progress(0..1) 为回调。"""
     out_dir = Path(s["out_dir"]).expanduser()
     img_dir = out_dir / "images"
@@ -589,9 +590,16 @@ def run_batch(s, log, progress, stop_event):
         done = 0
         ext = s["img_fmt"].lstrip(".")
 
+        def wait_pause():
+            """暂停时在此等待（可被停止打断）。"""
+            while (pause_event is not None and pause_event.is_set()
+                   and not stop_event.is_set()):
+                time.sleep(0.2)
+
         for idx, item in enumerate(s["files"]):
             if stop_event.is_set():
                 return False, "已停止（未生成完整 PPT）。"
+            wait_pause()
             src = Path(item["path"])
             rel_sub = item.get("rel", "")            # 相对子目录（posix，可为空）
             stem = item.get("stem") or src.stem or "structure"
@@ -605,7 +613,10 @@ def run_batch(s, log, progress, stop_event):
             log("info", f"[{idx+1}/{n_files}] 处理 {label}")
             try:
                 base_vesta = tmpdir / f"{idx}.vesta"
-                v.contcar_to_vesta(src, base_vesta)
+                if src.suffix.lower() == ".vesta":
+                    shutil.copy(src, base_vesta)          # 已是 .vesta，直接使用
+                else:
+                    v.contcar_to_vesta(src, base_vesta)
                 if base_modify:
                     v.modify_vesta(base_vesta, **base_modify)
 
@@ -653,6 +664,7 @@ def run_batch(s, log, progress, stop_event):
                     done += 1
                     progress(done / total)
 
+                wait_pause()
                 if s["do_side"] and not stop_event.is_set():
                     vf = tmpdir / f"{idx}_side.vesta"
                     shutil.copy(base_vesta, vf)
@@ -699,6 +711,9 @@ QLabel#CardTitle { font-size: 14px; font-weight: 600; color: #1C1C1E; background
 QLabel#CardSubtitle { font-size: 11px; color: #6E6E73; background: transparent; }
 QLabel#FieldLabel { font-size: 13px; color: #1C1C1E; background: transparent; }
 QLabel#HintLabel { font-size: 11px; color: #6E6E73; background: transparent; }
+
+QRadioButton { color: #1C1C1E; font-size: 13px; background: transparent; spacing: 6px; }
+QRadioButton::indicator { width: 15px; height: 15px; }
 
 QFrame#Card { background: #FFFFFF; border: 1px solid #E3E5EA; border-radius: 14px; }
 
@@ -947,15 +962,17 @@ class Worker(QObject):
     progress = Signal(float)
     done = Signal(bool, str)
 
-    def __init__(self, settings, stop_event):
+    def __init__(self, settings, stop_event, pause_event=None):
         super().__init__()
         self.settings = settings
         self.stop_event = stop_event
+        self.pause_event = pause_event
 
     @Slot()
     def run(self):
         try:
-            ok, msg = run_batch(self.settings, self._log, self._progress, self.stop_event)
+            ok, msg = run_batch(self.settings, self._log, self._progress,
+                                self.stop_event, self.pause_event)
         except Exception as exc:  # noqa: BLE001
             self._log("err", f"发生错误：{exc}")
             self._log("err", traceback.format_exc())
@@ -975,11 +992,13 @@ class Worker(QObject):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window
+                            | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.resize(968, 830)
 
         self.stop_event = threading.Event()
+        self.pause_event = threading.Event()
         self.running = False
         self.thread = None
         self.worker = None
@@ -1099,12 +1118,12 @@ class MainWindow(QWidget):
     # ------------------------------------------------------------------ #
     def _build_sections(self):
         # ① 输入文件
-        self._section_label("①  输入文件（按文件夹检索 CONTCAR）")
+        self._section_label("①  输入文件（按文件夹检索 CONTCAR / .vesta）")
         card = self._card("结构根目录",
-                          "给一个根目录，递归检索其下所有 CONTCAR；勾选要处理的项，"
+                          "给一个根目录，递归检索其下所有结构文件；勾选要处理的项，"
                           "输出时保持相对路径结构。")
         in_row = QHBoxLayout()
-        in_row.setContentsMargins(18, 10, 18, 4)
+        in_row.setContentsMargins(18, 10, 18, 2)
         in_row.setSpacing(8)
         self.input_root = QLineEdit()
         self.input_root.setPlaceholderText("选择或粘贴一个文件夹路径…")
@@ -1116,6 +1135,25 @@ class MainWindow(QWidget):
         b_scan.clicked.connect(self._scan)
         in_row.addWidget(b_scan)
         card.layout().addLayout(in_row)
+
+        type_row = QHBoxLayout()
+        type_row.setContentsMargins(18, 2, 18, 4)
+        type_row.setSpacing(14)
+        tlbl = QLabel("检索类型")
+        tlbl.setObjectName("FieldLabel")
+        type_row.addWidget(tlbl)
+        self.radio_contcar = QRadioButton("CONTCAR 文件")
+        self.radio_vesta = QRadioButton(".vesta 文件")
+        self.radio_contcar.setChecked(True)
+        self.radio_group = QButtonGroup(self)
+        self.radio_group.addButton(self.radio_contcar)
+        self.radio_group.addButton(self.radio_vesta)
+        self.radio_contcar.toggled.connect(self._on_type_changed)
+        self.radio_vesta.toggled.connect(self._on_type_changed)
+        type_row.addWidget(self.radio_contcar)
+        type_row.addWidget(self.radio_vesta)
+        type_row.addStretch(1)
+        card.layout().addLayout(type_row)
 
         tool_row = QHBoxLayout()
         tool_row.setContentsMargins(18, 4, 18, 2)
@@ -1279,6 +1317,7 @@ class MainWindow(QWidget):
         self._section_label("⑤  原子半径 / 颜色（留空则用 VESTA 默认）")
         card = self._card("原子样式 ATOMT / SITET",
                           "只对列出的元素生效；未列出的元素保持 VESTA 默认样式。")
+        self._row(card, "启用原子样式处理", self._toggle(True, "apply_atom_style_var"))
         head = QHBoxLayout()
         head.setContentsMargins(18, 8, 18, 0)
         head.setSpacing(6)
@@ -1325,9 +1364,15 @@ class MainWindow(QWidget):
         run_row.setContentsMargins(18, 14, 18, 6)
         run_row.setSpacing(8)
         self.run_btn = self._pill("▶  开始处理", "green", height=40, name="run_btn")
+        self.pause_btn = self._pill("⏸  暂停处理", "gray", height=40, name="pause_btn")
+        self.resume_btn = self._pill("▶  继续处理", "accent", height=40, name="resume_btn")
         self.stop_btn = self._pill("■  停止", "red", height=40, name="stop_btn")
+        self.pause_btn.setEnabled(False)
+        self.resume_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
         run_row.addWidget(self.run_btn)
+        run_row.addWidget(self.pause_btn)
+        run_row.addWidget(self.resume_btn)
         run_row.addWidget(self.stop_btn)
         self.progress = QProgressBar()
         self.progress.setRange(0, 1000)
@@ -1336,6 +1381,8 @@ class MainWindow(QWidget):
         run_row.addWidget(self.progress, 1)
         card.layout().addLayout(run_row)
         self.run_btn.clicked.connect(self._on_run)
+        self.pause_btn.clicked.connect(self._on_pause)
+        self.resume_btn.clicked.connect(self._on_resume)
         self.stop_btn.clicked.connect(self._on_stop)
 
         log_wrap = QWidget()
@@ -1367,8 +1414,14 @@ class MainWindow(QWidget):
         self.root_path = Path(root)
         self.file_table.setSortingEnabled(False)
         self.file_table.setRowCount(0)
-        found = [p for p in sorted(self.root_path.rglob("*"))
-                 if p.is_file() and p.name.upper() == "CONTCAR"]
+        if self.radio_vesta.isChecked():
+            found = [p for p in sorted(self.root_path.rglob("*"))
+                     if p.is_file() and p.suffix.lower() == ".vesta"]
+            kind = ".vesta"
+        else:
+            found = [p for p in sorted(self.root_path.rglob("*"))
+                     if p.is_file() and p.name.upper() == "CONTCAR"]
+            kind = "CONTCAR"
         for p in found:
             rel = p.relative_to(self.root_path).as_posix()
             r = self.file_table.rowCount()
@@ -1385,9 +1438,14 @@ class MainWindow(QWidget):
         self.file_table.horizontalHeader().setSortIndicator(0, Qt.AscendingOrder)
         self.file_table.setSortingEnabled(True)
         self.file_table.sortItems(0, Qt.AscendingOrder)
-        self.scan_info.setText(f"检索到 {len(found)} 个 CONTCAR")
-        self._append_log(f"在 {root} 下检索到 {len(found)} 个 CONTCAR 文件。", "info")
+        self.scan_info.setText(f"检索到 {len(found)} 个 {kind}")
+        self._append_log(f"在 {root} 下检索到 {len(found)} 个 {kind} 文件。", "info")
         self._refresh_elements()
+
+    def _on_type_changed(self, checked):
+        # 切换文件类型时，若已有有效路径则自动重新检索
+        if checked and self.input_root.text().strip():
+            self._scan()
 
     def _on_header_clicked(self, col):
         # 点击表头按该列排序（手动上移/下移后也能恢复排序）
@@ -1467,7 +1525,12 @@ class MainWindow(QWidget):
             it = self.file_table.item(r, 0)
             if it is None or it.checkState() != Qt.Checked:
                 continue
-            for el in parse_contcar_elements(Path(it.data(Qt.UserRole))):
+            p = Path(it.data(Qt.UserRole))
+            if p.suffix.lower() == ".vesta":
+                seq = [x["element"] for x in parse_atomt(p)]
+            else:
+                seq = parse_contcar_elements(p)
+            for el in seq:
                 if el not in elems:
                     elems.append(el)
         return elems
@@ -1617,14 +1680,17 @@ class MainWindow(QWidget):
 
         self.running = True
         self.stop_event.clear()
+        self.pause_event.clear()
         self.run_btn.setEnabled(False)
+        self.pause_btn.setEnabled(True)
+        self.resume_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.progress.setValue(0)
         self.log.clear()
         self._append_log("开始处理…", "info")
 
         self.thread = QThread(self)
-        self.worker = Worker(settings, self.stop_event)
+        self.worker = Worker(settings, self.stop_event, self.pause_event)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.log.connect(self._on_log)
@@ -1635,13 +1701,29 @@ class MainWindow(QWidget):
         self.thread.finished.connect(self.thread.deleteLater)
         self.thread.start()
 
+    def _on_pause(self):
+        self.pause_event.set()
+        self.pause_btn.setEnabled(False)
+        self.resume_btn.setEnabled(True)
+        self._append_log("已暂停，点「继续处理」恢复。", "warn")
+
+    def _on_resume(self):
+        self.pause_event.clear()
+        self.pause_btn.setEnabled(True)
+        self.resume_btn.setEnabled(False)
+        self._append_log("继续处理…", "info")
+
     def _on_stop(self):
         self.stop_event.set()
+        self.pause_event.clear()
         self._append_log("已请求停止，将在当前步骤结束后终止…", "warn")
 
     def _on_done(self, ok, msg):
         self.running = False
+        self.pause_event.clear()
         self.run_btn.setEnabled(True)
+        self.pause_btn.setEnabled(False)
+        self.resume_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
         self._append_log(msg, "ok" if ok else "err")
 
@@ -1698,7 +1780,7 @@ class MainWindow(QWidget):
             files.append({
                 "path": str(abspath),
                 "rel": rel_sub,
-                "stem": rel.name or abspath.stem,
+                "stem": rel.stem or rel.name or abspath.stem,
                 "label": title,
             })
 
@@ -1731,7 +1813,7 @@ class MainWindow(QWidget):
             "x_move": num(self.x_move_var, 0.0),
             "y_move": num(self.y_move_var, 0.0),
             "boundary": boundary,
-            "atom_params": atom_params,
+            "atom_params": atom_params if self.apply_atom_style_var.isChecked() else [],
             "legend": self.legend_var.isChecked(),
             "ball_cm": num(self.ball_cm_var, 1.8),
             "legend_cols": int(self.legend_cols_var.value()),
