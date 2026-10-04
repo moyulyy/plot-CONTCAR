@@ -268,6 +268,34 @@ def view_matrix(base, rx=0.0, ry=0.0, rz=0.0):
     return [M[i][j] for i in range(3) for j in range(3)]
 
 
+def crop_whitespace(path, pad: int = 12, thresh: int = 250) -> None:
+    """裁掉图片四周的纯白背景，让结构图更紧凑（参考 mk-ppt 的包围盒思路）。
+
+    VESTA 导出的图是固定画布的，结构往往只占中间一小块；裁掉白边后
+    图片内容会明显变大，放到幻灯片上也能更充分地占据版面。
+    """
+    if Image is None:
+        return
+    try:
+        im = Image.open(path).convert("RGB")
+        gray = im.convert("L")
+        # 白色 -> 0，非白 -> 255，再取非零区域的外接框
+        mask = gray.point(lambda v: 0 if v >= thresh else 255)
+        bbox = mask.getbbox()
+        if not bbox:
+            return
+        x0, y0, x1, y1 = bbox
+        x0 = max(0, x0 - pad)
+        y0 = max(0, y0 - pad)
+        x1 = min(im.width, x1 + pad)
+        y1 = min(im.height, y1 + pad)
+        if (x1 - x0) < 8 or (y1 - y0) < 8:
+            return
+        im.crop((x0, y0, x1, y1)).save(path)
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # PPT 生成
 # ---------------------------------------------------------------------------
@@ -278,22 +306,28 @@ def build_pptx(pptx_path, slides, legend, s):
     blank = prs.slide_layouts[6]
     SW, SH = 13.333, 7.5
 
+    # 图片布局：one = 每页一张（图片约占页面 80%）；two = 俯视+侧视同页并排
+    one_per_page = (s.get("slide_layout", "one") == "one")
+    max_frac = float(s.get("img_frac", 0.8) or 0.8)
+    max_frac = min(0.95, max(0.4, max_frac))
+
     def white_bg(slide):
         bg = slide.background.fill
         bg.solid()
         bg.fore_color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
 
-    def add_title(slide, text, top=0.35):
-        box = slide.shapes.add_textbox(Inches(0.7), Inches(top), Inches(11.9), Inches(0.7))
+    def add_title(slide, text, top=0.28):
+        box = slide.shapes.add_textbox(Inches(0.7), Inches(top), Inches(11.9), Inches(0.6))
         tf = box.text_frame
         tf.text = text
         p = tf.paragraphs[0]
-        p.font.size = Pt(28)
+        p.font.size = Pt(26)
         p.font.bold = True
         p.font.color.rgb = RGBColor(0x1C, 0x1C, 0x1E)
 
-    def add_caption(slide, text, left, top, width, size=14):
-        box = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(width), Inches(0.4))
+    def add_caption(slide, text, cx, top, width, size=14):
+        box = slide.shapes.add_textbox(Inches(cx - width / 2), Inches(top),
+                                       Inches(width), Inches(0.4))
         tf = box.text_frame
         tf.text = text
         p = tf.paragraphs[0]
@@ -301,21 +335,28 @@ def build_pptx(pptx_path, slides, legend, s):
         p.font.size = Pt(size)
         p.font.color.rgb = RGBColor(0x8E, 0x8E, 0x93)
 
-    def add_picture_fit(slide, path, box_x, box_y, box_w, box_h, border=True):
+    def img_size(path, bw, bh):
+        """等比缩放到 (bw,bh) 框内（不超出），返回英寸 (w,h)。"""
+        iw, ih = 4, 3
         if Image is not None:
-            img = Image.open(path)
-            iw, ih = img.width, img.height
-            aspect = iw / max(1, ih)
-        else:
-            aspect = 4.0 / 3.0
-        w = min(box_w, box_h * aspect)
-        h = w / aspect
-        x = box_x + (box_w - w) / 2
-        y = box_y + (box_h - h) / 2
-        pic = slide.shapes.add_picture(str(path), Inches(x), Inches(y), Inches(w), Inches(h))
-        if border:
-            pic.line.color.rgb = RGBColor(0xE5, 0xE5, 0xEA)
-            pic.line.width = Pt(0.75)
+            try:
+                im = Image.open(path)
+                iw, ih = im.size
+            except Exception:
+                pass
+        if iw <= 0 or ih <= 0:
+            iw, ih = 4, 3
+        r = min(bw / iw, bh / ih)
+        return iw * r, ih * r
+
+    def put_pic(slide, path, cx, box_top, box_h, box_w):
+        w, h = img_size(path, box_w, box_h)
+        left = cx - w / 2
+        top = box_top + (box_h - h) / 2
+        pic = slide.shapes.add_picture(str(path), Inches(left), Inches(top),
+                                       Inches(w), Inches(h))
+        pic.line.color.rgb = RGBColor(0xE5, 0xE5, 0xEA)
+        pic.line.width = Pt(0.75)
 
     # 标题页
     s0 = prs.slides.add_slide(blank)
@@ -339,28 +380,49 @@ def build_pptx(pptx_path, slides, legend, s):
     if s["legend"] and legend and s["legend_pos"] == "开头（标题后）":
         add_legend_slide(prs, blank, legend, s)
 
-    # 每个结构一页
-    gap = 0.4
-    margin = 0.7
-    col_w = (SW - 2 * margin - gap) / 2
-    img_box_top = 1.25
-    img_box_h = 5.0
-    cap_top = img_box_top + img_box_h + 0.12
+    # 内容区：约占页面的 max_frac（上下 / 左右各留白），图片只在其中等比缩放，绝不越界
+    region_w = SW * max_frac
+    region_x = (SW - region_w) / 2
+    region_top = 0.90
+    cap_space = 0.44
+    region_h = min(SH * max_frac, SH - 0.15 - region_top - cap_space)
+    region_h = max(1.0, region_h)
+    img_bound_h = region_h
+    cap_top = region_top + region_h + 0.04
+    gap = 0.35
+
+    def render_views(sl, views):
+        n = len(views)
+        if n == 1:
+            path, label = views[0]
+            put_pic(sl, path, region_x + region_w / 2, region_top, img_bound_h, region_w)
+            add_caption(sl, label, region_x + region_w / 2, cap_top, region_w)
+        else:
+            col_w = (region_w - gap * (n - 1)) / n
+            for i, (path, label) in enumerate(views):
+                cx = region_x + i * (col_w + gap) + col_w / 2
+                put_pic(sl, path, cx, region_top, img_bound_h, col_w)
+                add_caption(sl, label, cx, cap_top, col_w)
 
     for slide in slides:
-        sl = prs.slides.add_slide(blank)
-        white_bg(sl)
-        add_title(sl, slide["name"])
-        cols = [c for c in (slide["top"], slide["side"]) if c]
-        labels = []
+        views = []
         if slide["top"]:
-            labels.append("俯视图 Top View")
+            views.append((slide["top"], "俯视图 Top View"))
         if slide["side"]:
-            labels.append("侧视图 Side View")
-        for i, path in enumerate(cols):
-            x = margin + i * (col_w + gap)
-            add_picture_fit(sl, path, x, img_box_top, col_w, img_box_h)
-            add_caption(sl, labels[i], x, cap_top, col_w)
+            views.append((slide["side"], "侧视图 Side View"))
+        if not views:
+            continue
+        if one_per_page:
+            for path, label in views:
+                sl = prs.slides.add_slide(blank)
+                white_bg(sl)
+                add_title(sl, slide["name"])
+                render_views(sl, [(path, label)])
+        else:
+            sl = prs.slides.add_slide(blank)
+            white_bg(sl)
+            add_title(sl, slide["name"])
+            render_views(sl, views)
 
     if s["legend"] and legend and s["legend_pos"] == "末尾":
         add_legend_slide(prs, blank, legend, s)
@@ -514,6 +576,8 @@ def run_batch(s, log, progress, stop_event):
                                    y_move_frac=s["y_move"], scale_frac=s["scale_frac"])
                     img = img_sub / f"{stem}_top.{ext}"
                     v.export_image(vf, img, scale=s["scale"])
+                    if s.get("crop_margin", True):
+                        crop_whitespace(img)
                     slide["top"] = img
                     log("ok", f"    俯视图 → {img.relative_to(out_dir)}")
                     done += 1
@@ -526,6 +590,8 @@ def run_batch(s, log, progress, stop_event):
                                    y_move_frac=s["y_move"], scale_frac=s["scale_frac"])
                     img = img_sub / f"{stem}_side.{ext}"
                     v.export_image(vf, img, scale=s["scale"])
+                    if s.get("crop_margin", True):
+                        crop_whitespace(img)
                     slide["side"] = img
                     log("ok", f"    侧视图 → {img.relative_to(out_dir)}")
                     done += 1
@@ -1038,6 +1104,10 @@ class MainWindow(QWidget):
         self._row(card, "额外旋转 X (°)", self._dspin(0, -180, 180, 84, 0, "rot_x_var"))
         self._row(card, "额外旋转 Y (°)", self._dspin(0, -180, 180, 84, 0, "rot_y_var"))
         self._row(card, "额外旋转 Z (°)", self._dspin(0, -180, 180, 84, 0, "rot_z_var"))
+        self._row(card, "图片排版", self._combo(
+            ["每页一张（约占页面 80%）", "同页并排（俯视+侧视）"], 230, "slide_layout_var"))
+        self._row(card, "图片占页面比例", self._dspin(0.8, 0.4, 0.95, 84, 2, "img_frac_var"))
+        self._row(card, "裁剪空白边距", self._toggle(True, "crop_margin_var"))
 
         # ④ VESTA 显示
         self._section_label("④  VESTA 显示选项")
@@ -1398,6 +1468,9 @@ class MainWindow(QWidget):
             "rot_x": self.rot_x_var.value(),
             "rot_y": self.rot_y_var.value(),
             "rot_z": self.rot_z_var.value(),
+            "slide_layout": "one" if self.slide_layout_var.currentText().startswith("每页一张") else "two",
+            "img_frac": float(self.img_frac_var.value()),
+            "crop_margin": self.crop_margin_var.isChecked(),
             "comps": "ON" if self.comps_var.isChecked() else "OFF",
             "ucolp": "ON" if self.ucolp_var.isChecked() else "OFF",
             "sbond": "ON" if self.sbond_var.isChecked() else "OFF",
