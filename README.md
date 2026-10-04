@@ -89,7 +89,14 @@
 
 ## 🚀 快速开始
 
-### 方式一：GUI（推荐）
+### 方式零：下载便携版（免安装）
+
+在 [Releases](https://github.com/moyulyy/plot-CONTCAR/releases/latest) 下载 **`plot-CONTCAR.exe`**，双击即用
+（Windows x64，约 78 MB，**无需安装 Python / 依赖**）。运行前请自备 **VESTA**，并在界面里设置其路径。
+
+> 未签名的自编译程序，首次运行若被 SmartScreen 拦截，点「更多信息 → 仍要运行」即可。
+
+### 方式一：GUI（源码运行）
 
 ```bat
 :: 双击以下任一文件即可
@@ -290,6 +297,7 @@ plot-CONTCAR/
 ├── vesta_tools.py          # 核心类 Vesta + 命令行入口
 ├── vesta_modify.py         # .vesta 内容修改（COMPS/UCOLP/SBOND/BOUND/ATOMT/SITET/SCENE）
 ├── 启动GUI.lnk / .vbs / .bat # Windows 免黑框启动方式
+├── build_exe.bat           # 打包便携 exe（PyInstaller）
 ├── assets/
 │   ├── app.ico             # 程序图标（窗口 / 任务栏 / 快捷方式）
 │   └── app.png
@@ -317,6 +325,16 @@ plot-CONTCAR/
 ```bat
 pip install -r requirements.txt
 ```
+
+### 打包便携 exe
+
+```bat
+:: 依赖建好后双击（需先 pip install pyinstaller）
+build_exe.bat
+:: 产物：dist\plot-CONTCAR.exe
+```
+
+> conda 环境下 `pyexpat` 依赖的 `libexpat.dll` 已在 `build_exe.bat` 中通过 `--add-binary` 打入。
 
 ---
 

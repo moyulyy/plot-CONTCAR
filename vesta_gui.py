@@ -90,7 +90,15 @@ SECONDARY = "#5A5A60"
 BORDER = "#E3E5EA"
 
 # 程序图标（窗口 / 任务栏）
-ICON_PATH = Path(__file__).resolve().parent / "assets" / "app.ico"
+def _resource_path(rel: str) -> Path:
+    """兼容 PyInstaller 打包后的资源路径（_MEIPASS）。"""
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        return Path(base) / rel
+    return Path(__file__).resolve().parent / rel
+
+
+ICON_PATH = _resource_path("assets/app.ico")
 
 _ELEMENT_ORDER = ["H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne",
                   "Na", "Mg", "Al", "Si", "P", "S", "Cl", "Ar", "K", "Ca",

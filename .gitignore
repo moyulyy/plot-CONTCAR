@@ -23,6 +23,11 @@ ppt_output/
 # Machine-specific Windows shortcut
 *.lnk
 
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+
 # Local scratch / source note
 说明.txt
 test/
