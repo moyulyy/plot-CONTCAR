@@ -62,7 +62,7 @@ except Exception:
 
 from PySide6.QtCore import (Qt, QObject, QThread, Signal, Slot, Property,
                             QPropertyAnimation, QEasingCurve, QPointF, QRectF, QTimer)
-from PySide6.QtGui import QPainter, QColor, QFont, QPen
+from PySide6.QtGui import QPainter, QColor, QFont, QPen, QIcon
 from PySide6.QtWidgets import (
     QApplication, QWidget, QFrame, QLabel, QPushButton, QLineEdit, QComboBox,
     QSpinBox, QDoubleSpinBox, QScrollArea, QVBoxLayout, QHBoxLayout,
@@ -87,6 +87,9 @@ GRAY = "#6E6E73"
 LABEL = "#1C1C1E"
 SECONDARY = "#5A5A60"
 BORDER = "#E3E5EA"
+
+# 程序图标（窗口 / 任务栏）
+ICON_PATH = Path(__file__).resolve().parent / "assets" / "app.ico"
 
 _ELEMENT_ORDER = ["H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne",
                   "Na", "Mg", "Al", "Si", "P", "S", "Cl", "Ar", "K", "Ca",
@@ -1740,13 +1743,28 @@ class MainWindow(QWidget):
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
+def _set_app_id():
+    """设置 AppUserModelID，使 Windows 任务栏使用本程序图标而非 python 图标。"""
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "moyulyy.plotCONTCAR.1")
+    except Exception:
+        pass
+
+
 def main():
+    _set_app_id()
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setFont(QFont("Segoe UI", 10))
     app.setStyleSheet(QSS)
+    if ICON_PATH.exists():
+        app.setWindowIcon(QIcon(str(ICON_PATH)))
 
     w = MainWindow()
+    if ICON_PATH.exists():
+        w.setWindowIcon(QIcon(str(ICON_PATH)))
     screen = app.primaryScreen().availableGeometry()
     w.move(screen.center() - w.rect().center())
     w.show()

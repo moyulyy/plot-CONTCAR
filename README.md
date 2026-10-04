@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/app.png" alt="plot-CONTCAR icon" width="96">
+
 # plot-CONTCAR 🧪🖼️
 
 **把 VASP 的 `CONTCAR` / `POSCAR` 一键变成漂亮的「俯视图 + 侧视图」结构图，并自动整理进 PPT**
@@ -241,6 +243,9 @@ plot-CONTCAR/
 ├── vesta_tools.py          # 核心类 Vesta + 命令行入口
 ├── vesta_modify.py         # .vesta 内容修改（COMPS/UCOLP/SBOND/BOUND/ATOMT/SITET/SCENE）
 ├── 启动GUI.lnk / .vbs / .bat # Windows 免黑框启动方式
+├── assets/
+│   ├── app.ico             # 程序图标（窗口 / 任务栏 / 快捷方式）
+│   └── app.png
 ├── requirements.txt
 ├── docs/
 │   └── screenshot.png
