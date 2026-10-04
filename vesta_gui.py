@@ -847,29 +847,6 @@ class NoWheelDoubleSpinBox(QDoubleSpinBox):
         e.ignore()
 
 
-class FileTable(QTableWidget):
-    """文件表：支持表头点击排序 + 手动拖动行排序。
-
-    默认开启排序；一旦手动拖动，就关闭自动排序以保留手动顺序，
-    再次点击表头又会恢复按列排序。
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.setDragEnabled(True)
-        self.setAcceptDrops(True)
-        self.setDropIndicatorShown(True)
-        self.setDragDropMode(QAbstractItemView.InternalMove)
-        self.setDragDropOverwriteMode(False)
-        self.setDefaultDropAction(Qt.MoveAction)
-        self.setSortingEnabled(True)
-
-    def startDrag(self, actions):
-        # 手动拖动时先关闭自动排序，保证拖完的顺序不被重新排序覆盖
-        self.setSortingEnabled(False)
-        super().startDrag(actions)
-
-
 class Card(QFrame):
     """圆角白色卡片（带阴影）。"""
 
@@ -1146,20 +1123,28 @@ class MainWindow(QWidget):
         b_none.clicked.connect(lambda: self._check_all(False))
         b_ref = self._pill("按选中刷新元素", "outline", height=28)
         b_ref.clicked.connect(self._refresh_elements)
+        b_up = self._pill("↑ 上移", "outline", height=28)
+        b_up.clicked.connect(lambda: self._move_row(-1))
+        b_dn = self._pill("↓ 下移", "outline", height=28)
+        b_dn.clicked.connect(lambda: self._move_row(1))
         tool_row.addWidget(b_all)
         tool_row.addWidget(b_none)
         tool_row.addWidget(b_ref)
+        tool_row.addWidget(b_up)
+        tool_row.addWidget(b_dn)
         tool_row.addStretch(1)
         self.scan_info = QLabel("尚未检索")
         self.scan_info.setObjectName("HintLabel")
         tool_row.addWidget(self.scan_info)
         card.layout().addLayout(tool_row)
 
-        self.file_table = FileTable(0, 2)
-        self.file_table.setHorizontalHeaderLabels(["结构（勾选）", "PPT 页面标题（可编辑；可拖动排序）"])
+        self.file_table = QTableWidget(0, 2)
+        self.file_table.setHorizontalHeaderLabels(["结构（勾选）", "PPT 页面标题（可编辑）"])
         self.file_table.verticalHeader().setVisible(False)
         self.file_table.setFixedHeight(330)
         self.file_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.file_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.file_table.setSortingEnabled(True)
         self.file_table.setEditTriggers(QAbstractItemView.DoubleClicked
                                         | QAbstractItemView.SelectedClicked
                                         | QAbstractItemView.EditKeyPressed)
@@ -1396,10 +1381,47 @@ class MainWindow(QWidget):
         self._refresh_elements()
 
     def _on_header_clicked(self, col):
-        # 点击表头按该列排序（手动拖动后也能恢复排序）
+        # 点击表头按该列排序（手动上移/下移后也能恢复排序）
         self.file_table.setSortingEnabled(True)
         self.file_table.sortItems(
             col, self.file_table.horizontalHeader().sortIndicatorOrder())
+
+    def _row_data(self, r):
+        it0 = self.file_table.item(r, 0)
+        it1 = self.file_table.item(r, 1)
+        return {
+            "file": it0.text() if it0 else "",
+            "checked": it0.checkState() if it0 else Qt.Unchecked,
+            "path": it0.data(Qt.UserRole) if it0 else None,
+            "title": it1.text() if it1 else "",
+        }
+
+    def _set_row_data(self, r, d):
+        it0 = QTableWidgetItem(d["file"])
+        it0.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+        it0.setCheckState(d["checked"])
+        it0.setData(Qt.UserRole, d["path"])
+        self.file_table.setItem(r, 0, it0)
+        it1 = QTableWidgetItem(d["title"])
+        it1.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
+        it1.setToolTip("可编辑该结构在 PPT 页面上的标题")
+        self.file_table.setItem(r, 1, it1)
+
+    def _move_row(self, delta):
+        """把选中行上移(-1) / 下移(+1) 一位；手动顺序不被排序覆盖。"""
+        r = self.file_table.currentRow()
+        if r < 0:
+            QMessageBox.information(self, "提示", "请先选中要移动的一行。")
+            return
+        nr = r + delta
+        if nr < 0 or nr >= self.file_table.rowCount():
+            return
+        self.file_table.setSortingEnabled(False)
+        a, b = self._row_data(r), self._row_data(nr)
+        self._set_row_data(r, b)
+        self._set_row_data(nr, a)
+        self.file_table.setCurrentCell(nr, 1)
+        self.file_table.selectRow(nr)
 
     def _check_all(self, checked):
         state = Qt.Checked if checked else Qt.Unchecked
