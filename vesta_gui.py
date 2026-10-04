@@ -847,6 +847,29 @@ class NoWheelDoubleSpinBox(QDoubleSpinBox):
         e.ignore()
 
 
+class FileTable(QTableWidget):
+    """文件表：支持表头点击排序 + 手动拖动行排序。
+
+    默认开启排序；一旦手动拖动，就关闭自动排序以保留手动顺序，
+    再次点击表头又会恢复按列排序。
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.InternalMove)
+        self.setDragDropOverwriteMode(False)
+        self.setDefaultDropAction(Qt.MoveAction)
+        self.setSortingEnabled(True)
+
+    def startDrag(self, actions):
+        # 手动拖动时先关闭自动排序，保证拖完的顺序不被重新排序覆盖
+        self.setSortingEnabled(False)
+        super().startDrag(actions)
+
+
 class Card(QFrame):
     """圆角白色卡片（带阴影）。"""
 
@@ -1132,10 +1155,10 @@ class MainWindow(QWidget):
         tool_row.addWidget(self.scan_info)
         card.layout().addLayout(tool_row)
 
-        self.file_table = QTableWidget(0, 2)
-        self.file_table.setHorizontalHeaderLabels(["结构（勾选）", "PPT 页面标题（可编辑）"])
+        self.file_table = FileTable(0, 2)
+        self.file_table.setHorizontalHeaderLabels(["结构（勾选）", "PPT 页面标题（可编辑；可拖动排序）"])
         self.file_table.verticalHeader().setVisible(False)
-        self.file_table.setFixedHeight(184)
+        self.file_table.setFixedHeight(330)
         self.file_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.file_table.setEditTriggers(QAbstractItemView.DoubleClicked
                                         | QAbstractItemView.SelectedClicked
@@ -1144,6 +1167,8 @@ class MainWindow(QWidget):
         hh.setSectionResizeMode(0, QHeaderView.Stretch)
         hh.setSectionResizeMode(1, QHeaderView.Stretch)
         hh.setFixedHeight(34)
+        hh.setSortIndicatorShown(True)
+        hh.sectionClicked.connect(self._on_header_clicked)
         vh = self.file_table.verticalHeader()
         vh.setDefaultSectionSize(36)
         vh.setMinimumSectionSize(36)
@@ -1235,12 +1260,14 @@ class MainWindow(QWidget):
         bnd_grid = QHBoxLayout()
         bnd_grid.setSpacing(8)
         self.boundary_vars = []
-        for axis in ("a", "b", "c"):
+        for axis, dflt in (("a", ("-0.05", "1.05")),
+                           ("b", ("-0.05", "1.05")),
+                           ("c", ("-0.05", "0.95"))):
             tag = QLabel(f"{axis} 轴")
             tag.setObjectName("HintLabel")
             tag.setFixedWidth(30)
             bnd_grid.addWidget(tag)
-            for d in ("-0.05", "1.05"):
+            for d in dflt:
                 e = QLineEdit(d)
                 e.setFixedWidth(58)
                 e.setAlignment(Qt.AlignCenter)
@@ -1344,6 +1371,7 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "提示", "请输入一个有效的文件夹路径。")
             return
         self.root_path = Path(root)
+        self.file_table.setSortingEnabled(False)
         self.file_table.setRowCount(0)
         found = [p for p in sorted(self.root_path.rglob("*"))
                  if p.is_file() and p.name.upper() == "CONTCAR"]
@@ -1360,9 +1388,18 @@ class MainWindow(QWidget):
             it1.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
             it1.setToolTip("可编辑该结构在 PPT 页面上的标题")
             self.file_table.setItem(r, 1, it1)
+        self.file_table.horizontalHeader().setSortIndicator(0, Qt.AscendingOrder)
+        self.file_table.setSortingEnabled(True)
+        self.file_table.sortItems(0, Qt.AscendingOrder)
         self.scan_info.setText(f"检索到 {len(found)} 个 CONTCAR")
         self._append_log(f"在 {root} 下检索到 {len(found)} 个 CONTCAR 文件。", "info")
         self._refresh_elements()
+
+    def _on_header_clicked(self, col):
+        # 点击表头按该列排序（手动拖动后也能恢复排序）
+        self.file_table.setSortingEnabled(True)
+        self.file_table.sortItems(
+            col, self.file_table.horizontalHeader().sortIndicatorOrder())
 
     def _check_all(self, checked):
         state = Qt.Checked if checked else Qt.Unchecked
