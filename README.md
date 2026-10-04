@@ -6,6 +6,7 @@
 
 **把 VASP 的 `CONTCAR` / `POSCAR` 一键变成漂亮的「俯视图 + 侧视图」结构图，并自动整理进 PPT**
 
+[![Download exe](https://img.shields.io/badge/%E2%AC%87%EF%B8%8F%E4%B8%8B%E8%BD%BD%E4%BE%BF%E6%90%BA%E7%89%88-exe-0A84FF?style=flat-square)](https://github.com/moyulyy/plot-CONTCAR/releases/latest)
 [![Release](https://img.shields.io/github/v/release/moyulyy/plot-CONTCAR?style=flat-square&color=0A84FF&label=release)](https://github.com/moyulyy/plot-CONTCAR/releases)
 [![License](https://img.shields.io/badge/License-MIT-34C759?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?style=flat-square&logo=python&logoColor=white)](#-环境要求)
@@ -14,8 +15,10 @@
 [![Powered by VESTA](https://img.shields.io/badge/Powered%20by-VESTA-4B8BBE?style=flat-square)](https://jp-minerals.org/vesta/)
 
 一个 **iOS 风格** 的本地 GUI 工具（同时提供命令行 / Python API）：给出一个根目录，
-递归找出其中所有 `CONTCAR`，批量导出 **俯视图 / 侧视图**，自动整理成 **PPT**，
+递归找出其中所有 `CONTCAR`（或 `.vesta`），批量导出 **俯视图 / 侧视图**，自动整理成 **PPT**，
 并追加一页 **原子 ball + label 图例**。所有 VESTA 出图参数都做成了开关与输入框，无需改代码。
+
+📦 **免安装便携版**：[下载 `plot-CONTCAR.exe`](https://github.com/moyulyy/plot-CONTCAR/releases/latest)（Windows x64）
 
 <img src="docs/screenshot.png" alt="plot-CONTCAR GUI" width="860">
 
@@ -396,6 +399,7 @@ VASP4 的 `CONTCAR` 第 6 行是原子数而非元素符号，无法自动识别
 - 🪟 免黑框启动（`.lnk` / `.vbs` / `.bat`）；新增**程序图标**（窗口 / 任务栏 / 快捷方式）
 
 ### v1.1.1
+- 📦 提供**单文件便携版** `plot-CONTCAR.exe`（免安装 Python / 依赖，约 74 MB）
 - 📄 检索类型支持 **CONTCAR / `.vesta` 单选**；`.vesta` 可直接处理（跳过转换）
 - ⏯️ 运行中支持 **暂停 / 继续**
 - 📌 窗口**始终置顶**，不被 VESTA 遮盖
