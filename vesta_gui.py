@@ -268,30 +268,53 @@ def view_matrix(base, rx=0.0, ry=0.0, rz=0.0):
     return [M[i][j] for i in range(3) for j in range(3)]
 
 
-def crop_whitespace(path, pad: int = 12, thresh: int = 250) -> None:
-    """裁掉图片四周的纯白背景，让结构图更紧凑（参考 mk-ppt 的包围盒思路）。
+def _model_bbox(im, thresh: int = 250):
+    """返回图片中模型（非白区域）的外接框 (x0,y0,x1,y1)；无内容则 None。"""
+    gray = im.convert("L")
+    mask = gray.point(lambda v: 0 if v >= thresh else 255)
+    return mask.getbbox()
 
-    VESTA 导出的图是固定画布的，结构往往只占中间一小块；裁掉白边后
-    图片内容会明显变大，放到幻灯片上也能更充分地占据版面。
+
+def model_fraction(path, thresh: int = 250):
+    """模型在图片中的最大占比（0~1），用于判断是否需要缩放/裁剪。"""
+    if Image is None:
+        return None
+    try:
+        im = Image.open(path).convert("RGB")
+        bbox = _model_bbox(im, thresh)
+        if not bbox:
+            return None
+        x0, y0, x1, y1 = bbox
+        W, H = im.size
+        return max((x1 - x0) / W, (y1 - y0) / H)
+    except Exception:
+        return None
+
+
+def fit_model_in_image(path, target: float = 0.8, thresh: int = 250) -> None:
+    """裁剪到模型外接框，再居中留白，使模型恰好占据整图的 target（默认 80%）。
+
+    参考 ``mk-ppt`` 的包围盒裁剪思路：先取非白区域外接框（裁掉四周空白），
+    再补一圈白边，让模型占图片的比例可控（既不顶到边、也不会太小）。
     """
     if Image is None:
         return
     try:
         im = Image.open(path).convert("RGB")
-        gray = im.convert("L")
-        # 白色 -> 0，非白 -> 255，再取非零区域的外接框
-        mask = gray.point(lambda v: 0 if v >= thresh else 255)
-        bbox = mask.getbbox()
+        bbox = _model_bbox(im, thresh)
         if not bbox:
             return
         x0, y0, x1, y1 = bbox
-        x0 = max(0, x0 - pad)
-        y0 = max(0, y0 - pad)
-        x1 = min(im.width, x1 + pad)
-        y1 = min(im.height, y1 + pad)
-        if (x1 - x0) < 8 or (y1 - y0) < 8:
+        mw, mh = x1 - x0, y1 - y0
+        if mw < 4 or mh < 4:
             return
-        im.crop((x0, y0, x1, y1)).save(path)
+        target = min(0.98, max(0.2, float(target)))
+        cw = max(mw + 1, int(round(mw / target)))
+        ch = max(mh + 1, int(round(mh / target)))
+        model = im.crop((x0, y0, x1, y1))
+        canvas = Image.new("RGB", (cw, ch), (255, 255, 255))
+        canvas.paste(model, ((cw - mw) // 2, (ch - mh) // 2))
+        canvas.save(path)
     except Exception:
         pass
 
@@ -568,16 +591,31 @@ def run_batch(s, log, progress, stop_event):
                     vesta_sub.mkdir(parents=True, exist_ok=True)
 
                 slide = {"name": label, "top": None, "side": None}
+                target = float(s.get("model_frac", 0.8) or 0.8)
+                fit_mode = s.get("model_fit", "crop")   # crop / zoom / both
+
+                def process_view(vf, img, mat):
+                    """导出并让模型在图片中约占 target（VESTA 缩放 / 裁剪 或两者）。"""
+                    base_frac = float(s["scale_frac"]) or 1.0
+                    v.modify_vesta(vf, version=mat, x_move_frac=s["x_move"],
+                                   y_move_frac=s["y_move"], scale_frac=base_frac)
+                    v.export_image(vf, img, scale=s["scale"])
+                    if fit_mode in ("zoom", "both"):
+                        f = model_fraction(img)
+                        if f and f > 1e-6:
+                            new_frac = max(0.05, min(50.0, base_frac * target / f))
+                            if abs(new_frac - base_frac) > 0.02 * base_frac:
+                                v.modify_vesta(vf, version=mat, x_move_frac=s["x_move"],
+                                               y_move_frac=s["y_move"], scale_frac=new_frac)
+                                v.export_image(vf, img, scale=s["scale"])
+                    if fit_mode in ("crop", "both"):
+                        fit_model_in_image(img, target)
 
                 if s["do_top"]:
                     vf = tmpdir / f"{idx}_top.vesta"
                     shutil.copy(base_vesta, vf)
-                    v.modify_vesta(vf, version=top_mat, x_move_frac=s["x_move"],
-                                   y_move_frac=s["y_move"], scale_frac=s["scale_frac"])
                     img = img_sub / f"{stem}_top.{ext}"
-                    v.export_image(vf, img, scale=s["scale"])
-                    if s.get("crop_margin", True):
-                        crop_whitespace(img)
+                    process_view(vf, img, top_mat)
                     slide["top"] = img
                     log("ok", f"    俯视图 → {img.relative_to(out_dir)}")
                     done += 1
@@ -586,12 +624,8 @@ def run_batch(s, log, progress, stop_event):
                 if s["do_side"] and not stop_event.is_set():
                     vf = tmpdir / f"{idx}_side.vesta"
                     shutil.copy(base_vesta, vf)
-                    v.modify_vesta(vf, version=side_mat, x_move_frac=s["x_move"],
-                                   y_move_frac=s["y_move"], scale_frac=s["scale_frac"])
                     img = img_sub / f"{stem}_side.{ext}"
-                    v.export_image(vf, img, scale=s["scale"])
-                    if s.get("crop_margin", True):
-                        crop_whitespace(img)
+                    process_view(vf, img, side_mat)
                     slide["side"] = img
                     log("ok", f"    侧视图 → {img.relative_to(out_dir)}")
                     done += 1
@@ -1104,10 +1138,12 @@ class MainWindow(QWidget):
         self._row(card, "额外旋转 X (°)", self._dspin(0, -180, 180, 84, 0, "rot_x_var"))
         self._row(card, "额外旋转 Y (°)", self._dspin(0, -180, 180, 84, 0, "rot_y_var"))
         self._row(card, "额外旋转 Z (°)", self._dspin(0, -180, 180, 84, 0, "rot_z_var"))
+        self._row(card, "模型占图片比例", self._dspin(0.8, 0.3, 0.95, 84, 2, "model_frac_var"))
+        self._row(card, "模型放大方式", self._combo(
+            ["裁剪留白（推荐）", "VESTA 缩放", "裁剪 + VESTA 缩放"], 180, "model_fit_var"))
         self._row(card, "图片排版", self._combo(
-            ["每页一张（约占页面 80%）", "同页并排（俯视+侧视）"], 230, "slide_layout_var"))
+            ["同页并排（俯视+侧视）", "每页一张（约占页面 80%）"], 230, "slide_layout_var"))
         self._row(card, "图片占页面比例", self._dspin(0.8, 0.4, 0.95, 84, 2, "img_frac_var"))
-        self._row(card, "裁剪空白边距", self._toggle(True, "crop_margin_var"))
 
         # ④ VESTA 显示
         self._section_label("④  VESTA 显示选项")
@@ -1468,9 +1504,11 @@ class MainWindow(QWidget):
             "rot_x": self.rot_x_var.value(),
             "rot_y": self.rot_y_var.value(),
             "rot_z": self.rot_z_var.value(),
+            "model_frac": float(self.model_frac_var.value()),
+            "model_fit": {"裁剪留白（推荐）": "crop", "VESTA 缩放": "zoom",
+                          "裁剪 + VESTA 缩放": "both"}.get(self.model_fit_var.currentText(), "crop"),
             "slide_layout": "one" if self.slide_layout_var.currentText().startswith("每页一张") else "two",
             "img_frac": float(self.img_frac_var.value()),
-            "crop_margin": self.crop_margin_var.isChecked(),
             "comps": "ON" if self.comps_var.isChecked() else "OFF",
             "ucolp": "ON" if self.ucolp_var.isChecked() else "OFF",
             "sbond": "ON" if self.sbond_var.isChecked() else "OFF",
