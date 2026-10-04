@@ -23,20 +23,64 @@
 
 ---
 
+## 📑 目录
+
+- [✨ 特性](#-特性)
+- [🔄 工作流程](#-工作流程)
+- [🚀 快速开始](#-快速开始)
+- [🖼️ 输出结构](#️-输出结构)
+- [🖥️ GUI 使用](#️-gui-使用)
+- [🧰 命令行参数（vesta_tools.py）](#-命令行参数vesta_toolspy)
+- [🛠️ 修改 .vesta 内容](#️-修改-vesta-内容)
+- [🧩 项目结构](#-项目结构)
+- [🖥️ 环境要求](#️-环境要求)
+- [🧠 实现细节 & FAQ](#-实现细节--faq)
+- [📝 更新日志](#-更新日志)
+- [📄 License](#-license)
+
+---
+
 ## ✨ 特性
 
 |   | 功能 | 说明 |
 | :-: | :--- | :--- |
-| 🗂️ | **按目录检索** | 指定一个根目录，递归检索所有 `CONTCAR` 文件，勾选需要的项 |
+| 🗂️ | **按目录检索** | 指定根目录，递归检索所有 `CONTCAR`；结果表可勾选、**标题可编辑**、**表头排序**与**上移/下移/置顶/置底** |
 | 🌳 | **保持相对路径** | 导出的图片与 `.vesta` 完全镜像输入目录结构，便于归档对照 |
 | 🔭 | **俯视 / 侧视图** | 俯视图沿 *c* 轴、侧视图 *c* 轴竖直（可选沿 *a* / *b* 轴看） |
+| 📐 | **模型占图约 80%** | 按非白像素包围盒自动调整，让**模型本身**占满整图约 80%，不顶边也不偏小 |
 | 🎛️ | **参数全界面化** | 坐标轴 / 晶胞边界 / 化学键 / 显示边界 / 缩放平移 / 原子半径颜色 / 视角 / 画质 / 超时… |
-| 🧬 | **原子样式自动** | 自动读取结构中的元素并去重，填入默认半径与颜色（Jmol 配色） |
-| 📊 | **一键生成 PPT** | 标题页 + 每个结构一页（俯视 / 侧视对照）+ 原子图例页 |
+| 🧬 | **原子样式自动** | 自动读取结构元素并去重，填入默认半径与颜色（Jmol 配色），**颜色支持色轮取色** |
+| 🎨 | **内置色轮** | 原子颜色点击色块即弹出取色器，实时预览 |
+| 📊 | **一键生成 PPT** | 标题页 + 每个结构一页（俯视 / 侧视对照，**等高对齐、无边框**）+ 原子图例页 |
 | 🔵 | **原子图例页** | 用真实原子颜色渲染带高光的 3D 小球，球 + 元素标签一一对应 |
+| 🧾 | **按视图导出 .vesta** | 每个结构输出 `CONTCAR_top.vesta` / `CONTCAR_side.vesta` |
+| 🖱️ | **防误触** | 滚动页面时，鼠标停在下拉框 / 数值框上**不会误改**数值 |
 | 🪟 | **后台静默出图** | 用隐藏窗口（伪无头）调用 VESTA，屏幕不弹窗、可无人值守 |
 | 🕶️ | **iOS 风格界面** | 无边框圆角弹窗、卡片阴影、滑动开关、胶囊按钮，支持高 DPI |
-| 📦 | **零配置启动** | 双击 `启动GUI.lnk` / `.vbs` 即可（无命令行黑框） |
+| 📦 | **零配置启动** | 双击 `启动GUI.lnk` / `.vbs` 即可（无命令行黑框，带任务栏图标） |
+
+---
+
+## 🔄 工作流程
+
+```text
+根目录 ──► 递归检索 CONTCAR ──► 勾选 / 排序 / 自定义标题
+                                      │
+                                      ▼
+                    CONTCAR ──► .vesta（应用显示设置）
+                                      │
+                    ┌─────────────────┴─────────────────┐
+                    ▼                                   ▼
+        俯视图 .vesta（SCENE）                 侧视图 .vesta（SCENE）
+                    │                                   │
+           VESTA 出图 + 模型占图≈80%           VESTA 出图 + 模型占图≈80%
+                    │                                   │
+         images/**/CONTCAR_top.png            images/**/CONTCAR_side.png
+         vesta/**/CONTCAR_top.vesta           vesta/**/CONTCAR_side.vesta
+                    └─────────────────┬─────────────────┘
+                                      ▼
+              PPT：标题页 + 结构页（俯视/侧视，等高）+ 原子图例页
+```
 
 ---
 
@@ -102,16 +146,16 @@ structures/
 ```text
 output/
 ├── structures.pptx                     # 汇总 PPT（标题页 + 结构页 + 原子图例页）
-├── images/
-│   ├── CONTCAR_top.png                 # 俯视图
-│   ├── CONTCAR_side.png                # 侧视图
+├── images/                             # 截图（俯视 / 侧视）
+│   ├── CONTCAR_top.png
+│   ├── CONTCAR_side.png
 │   ├── Pt/
 │   │   ├── CONTCAR_top.png
 │   │   └── CONTCAR_side.png
 │   └── Pt3Ni(111)/
 │       ├── CONTCAR_top.png
 │       └── CONTCAR_side.png
-└── vesta/                              # 每个结构按视图各存一份（保持相对路径）
+└── vesta/                              # 每个结构按视图各存一份
     ├── CONTCAR_top.vesta / CONTCAR_side.vesta
     ├── Pt/CONTCAR_top.vesta / CONTCAR_side.vesta
     └── Pt3Ni(111)/CONTCAR_top.vesta / CONTCAR_side.vesta
@@ -122,7 +166,7 @@ PPT 每一页示例：
 | 页 | 内容 |
 | :-: | :--- |
 | 1 | 标题页（结构数量、生成时间） |
-| 2…N | 每个结构一页：**俯视图 + 侧视图** 并排，标注相对路径 |
+| 2…N | 每个结构一页：**俯视图 + 侧视图** 并排（等高对齐），标注自定义标题 |
 | 末页 | **原子图例**：每个元素一个 3D 小球 + 元素标签 |
 
 <div align="center">
@@ -179,7 +223,7 @@ VESTA 导出的 PNG 画布是固定的，模型往往只占中间一小块。工
   同时约束总宽与单图宽度，**不会出现过高或过宽的图**（适配二维材料 / 体材料 / 含真空层的 slab）。
 - 幻灯片中的图片**不添加任何边框**。
 
-### 页面标题自定义
+### 页面标题与排序
 
 检索后的表格第二列可直接编辑，作为每个结构所在 PPT 页面的标题（默认 = 相对路径）。
 表格支持**点击表头按列排序**；也可**选中某行后用「↑ 上移 / ↓ 下移 / ⤒ 置顶 / ⤓ 置底」**手动调整顺序（手动调整后自动关闭排序以保留顺序，再点表头又会恢复排序）。
@@ -290,6 +334,13 @@ VESTA 即使带 `-close` 也不会自动退出，且返回码不可靠（成功�
 </details>
 
 <details>
+<summary><b>模型在图片里太小 / 太大怎么办？</b></summary>
+
+在 ③ 视图设置里调整「模型占图片比例」（默认 0.8）与「模型放大方式」：
+`裁剪留白`（默认）、`VESTA 缩放`、`裁剪 + VESTA 缩放`，三种方式都能让模型约占整图 80%。
+</details>
+
+<details>
 <summary><b>能找到元素但读不到元素名（VASP4 格式）怎么办？</b></summary>
 
 VASP4 的 `CONTCAR` 第 6 行是原子数而非元素符号，无法自动识别元素；
@@ -297,10 +348,34 @@ VASP4 的 `CONTCAR` 第 6 行是原子数而非元素符号，无法自动识别
 </details>
 
 <details>
+<summary><b>任务栏图标还是 python 图标？</b></summary>
+
+程序已设置 `AppUserModelID` 与窗口图标，正常应显示本程序图标；
+若仍是旧图标，是 Windows 图标缓存所致，重启资源管理器或注销重登一次即可。
+</details>
+
+<details>
 <summary><b>能在无用户登录的服务 / 计划任务里跑吗？</b></summary>
 
 隐藏窗口仍需要可用的交互式桌面 / 图形会话；无登录场景下 OpenGL 可能不可用。
 </details>
+
+---
+
+## 📝 更新日志
+
+### v1.1.0
+- 🖥️ **iOS 风格 GUI（PySide6）**：无边框圆角窗口、卡片阴影、滑动开关、胶囊按钮、高 DPI
+- 🗂️ **按根目录检索** `CONTCAR`；结果表可勾选、**标题可编辑**、**表头排序** + **上移/下移/置顶/置底**
+- 🌳 导出图片与 `.vesta` **保持相对路径结构**；`.vesta` 按视图输出 `_top` / `_side`
+- 📐 **模型占导出图片约 80%**（裁剪留白 / VESTA 缩放 / 两者），不顶边不截断
+- 🧬 原子样式按结构元素自动填充；**颜色支持色轮取色**
+- 📊 PPT：标题页 + 结构页（俯视 / 侧视，**等高对齐、无边框**）+ 原子图例页
+- 🎛️ 所有 VESTA 参数界面化；**禁用滚轮误改**下拉 / 数值框
+- 🪟 免黑框启动（`.lnk` / `.vbs` / `.bat`）；新增**程序图标**（窗口 / 任务栏 / 快捷方式）
+
+### v1.0.0
+- 首个正式版：`CONTCAR → VESTA 出图 + PPT + 原子图例`，iOS 风格 GUI、命令行与 Python API
 
 ---
 
@@ -326,7 +401,7 @@ VASP4 的 `CONTCAR` 第 6 行是原子数而非元素符号，无法自动识别
 dedicated **atom ball + label legend** slide. It ships with an **iOS-style PySide6 GUI**, a CLI
 (`vesta_tools.py`), and a Python API. Given a root folder, it recursively finds all `CONTCAR` files,
 lets you pick which to process, and preserves the relative folder structure in both the image and
-`.vesta` outputs.
+`.vesta` outputs. The model is auto-scaled to occupy ~80% of each exported image.
 
 Requires Windows, Python 3.9+, VESTA 64-bit, and `PySide6` + `python-pptx`.
 
