@@ -66,8 +66,8 @@ from PySide6.QtGui import QPainter, QColor, QFont, QPen
 from PySide6.QtWidgets import (
     QApplication, QWidget, QFrame, QLabel, QPushButton, QLineEdit, QComboBox,
     QSpinBox, QDoubleSpinBox, QScrollArea, QVBoxLayout, QHBoxLayout,
-    QProgressBar, QPlainTextEdit, QFileDialog, QMessageBox, QListWidget,
-    QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView,
+    QProgressBar, QPlainTextEdit, QFileDialog, QMessageBox, QColorDialog,
+    QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QAbstractButton, QGraphicsDropShadowEffect, QSizePolicy,
 )
 
@@ -726,7 +726,7 @@ QListWidget::item:hover { background: #F2F2F7; }
 
 QTableWidget { background: #F8F8FA; border: 1px solid #D9D9DE; border-radius: 10px;
                gridline-color: #ECECEF; font-size: 12px; color: #1C1C1E; }
-QTableWidget::item { padding: 3px 6px; }
+QTableWidget::item { padding: 2px 6px; }
 QTableWidget::item:selected { background: #EAF3FF; color: #0A84FF; }
 QHeaderView::section { background: #FFFFFF; color: #6E6E73; border: none;
                        border-bottom: 1px solid #E5E5EA; padding: 6px; font-weight: 600; }
@@ -824,6 +824,27 @@ class Toggle(QAbstractButton):
         p.drawEllipse(QPointF(self._thumb + 13, h / 2 + 1), 11.5, 11.5)
         p.setBrush(QColor("#FFFFFF"))
         p.drawEllipse(QPointF(self._thumb + 13, h / 2), 11, 11)
+
+
+class NoWheelComboBox(QComboBox):
+    """下拉框：忽略滚轮，避免滚动页面时误改选项。"""
+
+    def wheelEvent(self, e):
+        e.ignore()
+
+
+class NoWheelSpinBox(QSpinBox):
+    """整数输入框：忽略滚轮。"""
+
+    def wheelEvent(self, e):
+        e.ignore()
+
+
+class NoWheelDoubleSpinBox(QDoubleSpinBox):
+    """浮点输入框：忽略滚轮。"""
+
+    def wheelEvent(self, e):
+        e.ignore()
 
 
 class Card(QFrame):
@@ -1007,7 +1028,7 @@ class MainWindow(QWidget):
         return e
 
     def _dspin(self, default, lo, hi, width=84, dec=1, name=None):
-        s = QDoubleSpinBox()
+        s = NoWheelDoubleSpinBox()
         s.setRange(lo, hi)
         s.setDecimals(dec)
         s.setValue(float(default))
@@ -1018,7 +1039,7 @@ class MainWindow(QWidget):
         return s
 
     def _spin(self, default, lo, hi, width=84, name=None):
-        s = QSpinBox()
+        s = NoWheelSpinBox()
         s.setRange(lo, hi)
         s.setValue(int(default))
         s.setFixedWidth(width)
@@ -1027,7 +1048,7 @@ class MainWindow(QWidget):
         return s
 
     def _combo(self, values, width=130, name=None):
-        c = QComboBox()
+        c = NoWheelComboBox()
         c.addItems(values)
         c.setFixedWidth(width)
         if name:
@@ -1114,7 +1135,7 @@ class MainWindow(QWidget):
         self.file_table = QTableWidget(0, 2)
         self.file_table.setHorizontalHeaderLabels(["结构（勾选）", "PPT 页面标题（可编辑）"])
         self.file_table.verticalHeader().setVisible(False)
-        self.file_table.setFixedHeight(170)
+        self.file_table.setFixedHeight(184)
         self.file_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.file_table.setEditTriggers(QAbstractItemView.DoubleClicked
                                         | QAbstractItemView.SelectedClicked
@@ -1122,6 +1143,10 @@ class MainWindow(QWidget):
         hh = self.file_table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.Stretch)
         hh.setSectionResizeMode(1, QHeaderView.Stretch)
+        hh.setFixedHeight(34)
+        vh = self.file_table.verticalHeader()
+        vh.setDefaultSectionSize(36)
+        vh.setMinimumSectionSize(36)
         list_wrap = QWidget()
         list_lay = QHBoxLayout(list_wrap)
         list_lay.setContentsMargins(18, 4, 18, 14)
@@ -1252,7 +1277,7 @@ class MainWindow(QWidget):
 
         add_row = QHBoxLayout()
         add_row.setContentsMargins(18, 2, 18, 14)
-        self.element_combo = QComboBox()
+        self.element_combo = NoWheelComboBox()
         self.element_combo.addItems(_ELEMENT_ORDER)
         self.element_combo.setCurrentText("Fe")
         self.element_combo.setFixedWidth(90)
@@ -1396,8 +1421,41 @@ class MainWindow(QWidget):
         r.setFixedWidth(80)
         r.setAlignment(Qt.AlignCenter)
         c = QLineEdit(color)
-        c.setFixedWidth(100)
+        c.setFixedWidth(96)
         c.setAlignment(Qt.AlignCenter)
+
+        # 颜色色轮：点色块打开取色器；输入框变化时同步更新
+        sw = QPushButton()
+        sw.setFixedSize(28, 28)
+        sw.setCursor(Qt.PointingHandCursor)
+        sw.setToolTip("点击打开色轮选择颜色")
+
+        def _cur_qcolor():
+            t = c.text().strip()
+            qc = QColor(t)
+            if qc.isValid():
+                return qc
+            rgb = parse_color(t)
+            if rgb:
+                rr, gg, bb = (int(x) for x in rgb.split())
+                return QColor(rr, gg, bb)
+            return QColor("#808080")
+
+        def refresh_swatch(*_):
+            bg = _cur_qcolor().name()
+            sw.setStyleSheet(
+                f"QPushButton{{background:{bg}; border:1px solid #D9D9DE; border-radius:7px;}}"
+                "QPushButton:hover{border:1px solid #0A84FF;}")
+
+        def pick_color():
+            chosen = QColorDialog.getColor(_cur_qcolor(), self, "选择原子颜色")
+            if chosen.isValid():
+                c.setText(chosen.name().upper())
+
+        sw.clicked.connect(pick_color)
+        c.textChanged.connect(refresh_swatch)
+        refresh_swatch()
+
         d = QPushButton("✕")
         d.setObjectName("DeleteBtn")
         d.setFixedSize(28, 28)
@@ -1406,6 +1464,7 @@ class MainWindow(QWidget):
         h.addWidget(e)
         h.addWidget(r)
         h.addWidget(c)
+        h.addWidget(sw)
         h.addWidget(d)
         h.addStretch(1)
         self.atom_rows.append({"frame": frame, "element": e, "radius": r, "color": c})
