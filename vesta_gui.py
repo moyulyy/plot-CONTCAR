@@ -67,7 +67,8 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QFrame, QLabel, QPushButton, QLineEdit, QComboBox,
     QSpinBox, QDoubleSpinBox, QScrollArea, QVBoxLayout, QHBoxLayout,
     QProgressBar, QPlainTextEdit, QFileDialog, QMessageBox, QListWidget,
-    QListWidgetItem, QAbstractButton, QGraphicsDropShadowEffect, QSizePolicy,
+    QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView,
+    QAbstractItemView, QAbstractButton, QGraphicsDropShadowEffect, QSizePolicy,
 )
 
 # 复用核心工具
@@ -372,14 +373,22 @@ def build_pptx(pptx_path, slides, legend, s):
         r = min(bw / iw, bh / ih)
         return iw * r, ih * r
 
-    def put_pic(slide, path, cx, box_top, box_h, box_w):
-        w, h = img_size(path, box_w, box_h)
-        left = cx - w / 2
-        top = box_top + (box_h - h) / 2
-        pic = slide.shapes.add_picture(str(path), Inches(left), Inches(top),
-                                       Inches(w), Inches(h))
-        pic.line.color.rgb = RGBColor(0xE5, 0xE5, 0xEA)
-        pic.line.width = Pt(0.75)
+    def img_dims(path):
+        iw, ih = 4, 3
+        if Image is not None:
+            try:
+                im = Image.open(path)
+                iw, ih = im.size
+            except Exception:
+                pass
+        if iw <= 0 or ih <= 0:
+            iw, ih = 4, 3
+        return iw, ih
+
+    def put_pic(slide, path, left, top, w, h):
+        # 不加边框，图片干净地放在页面上
+        slide.shapes.add_picture(str(path), Inches(left), Inches(top),
+                                 Inches(w), Inches(h))
 
     # 标题页
     s0 = prs.slides.add_slide(blank)
@@ -418,14 +427,32 @@ def build_pptx(pptx_path, slides, legend, s):
         n = len(views)
         if n == 1:
             path, label = views[0]
-            put_pic(sl, path, region_x + region_w / 2, region_top, img_bound_h, region_w)
+            w, h = img_size(path, region_w, region_h)
+            left = region_x + (region_w - w) / 2
+            top = region_top + (region_h - h) / 2
+            put_pic(sl, path, left, top, w, h)
             add_caption(sl, label, region_x + region_w / 2, cap_top, region_w)
-        else:
-            col_w = (region_w - gap * (n - 1)) / n
-            for i, (path, label) in enumerate(views):
-                cx = region_x + i * (col_w + gap) + col_w / 2
-                put_pic(sl, path, cx, region_top, img_bound_h, col_w)
-                add_caption(sl, label, cx, cap_top, col_w)
+            return
+        # 多图同页：统一高度（等高对齐），并约束总宽与单图宽度，避免过高 / 过宽
+        aspects = [img_dims(p)[0] / img_dims(p)[1] for p, _ in views]
+        total_gap = gap * (n - 1)
+        avail_w = region_w - total_gap
+        max_w_each = avail_w * 0.72
+        h = region_h
+        if sum(aspects) > 0:
+            h = min(h, avail_w / sum(aspects))
+        for a in aspects:
+            if a > 0:
+                h = min(h, max_w_each / a)
+        h = max(0.4, h)
+        widths = [a * h for a in aspects]
+        total_w = sum(widths) + total_gap
+        x = region_x + (region_w - total_w) / 2
+        top = region_top + (region_h - h) / 2
+        for (path, label), w in zip(views, widths):
+            put_pic(sl, path, x, top, w, h)
+            add_caption(sl, label, x + w / 2, cap_top, w)
+            x += w + gap
 
     for slide in slides:
         views = []
@@ -616,6 +643,8 @@ def run_batch(s, log, progress, stop_event):
                     shutil.copy(base_vesta, vf)
                     img = img_sub / f"{stem}_top.{ext}"
                     process_view(vf, img, top_mat)
+                    if s["keep_vesta"]:
+                        shutil.copy(vf, vesta_sub / f"{stem}_top.vesta")
                     slide["top"] = img
                     log("ok", f"    俯视图 → {img.relative_to(out_dir)}")
                     done += 1
@@ -626,13 +655,13 @@ def run_batch(s, log, progress, stop_event):
                     shutil.copy(base_vesta, vf)
                     img = img_sub / f"{stem}_side.{ext}"
                     process_view(vf, img, side_mat)
+                    if s["keep_vesta"]:
+                        shutil.copy(vf, vesta_sub / f"{stem}_side.vesta")
                     slide["side"] = img
                     log("ok", f"    侧视图 → {img.relative_to(out_dir)}")
                     done += 1
                     progress(done / total)
 
-                if s["keep_vesta"]:
-                    shutil.copy(base_vesta, vesta_sub / f"{stem}.vesta")
                 slides.append(slide)
             except Exception as exc:  # noqa: BLE001
                 log("err", f"    [失败] {exc}")
@@ -694,6 +723,13 @@ QListWidget { background: #F8F8FA; border: 1px solid #D9D9DE; border-radius: 10p
 QListWidget::item { padding: 4px 6px; border-radius: 6px; }
 QListWidget::item:selected { background: #EAF3FF; color: #0A84FF; }
 QListWidget::item:hover { background: #F2F2F7; }
+
+QTableWidget { background: #F8F8FA; border: 1px solid #D9D9DE; border-radius: 10px;
+               gridline-color: #ECECEF; font-size: 12px; color: #1C1C1E; }
+QTableWidget::item { padding: 3px 6px; }
+QTableWidget::item:selected { background: #EAF3FF; color: #0A84FF; }
+QHeaderView::section { background: #FFFFFF; color: #6E6E73; border: none;
+                       border-bottom: 1px solid #E5E5EA; padding: 6px; font-weight: 600; }
 
 QPushButton#Pill { border: none; border-radius: 17px; font-size: 13px; font-weight: 600; padding: 0px 20px; }
 QPushButton#Pill[variant="accent"] { background: #0A84FF; color: #FFFFFF; }
@@ -1075,12 +1111,21 @@ class MainWindow(QWidget):
         tool_row.addWidget(self.scan_info)
         card.layout().addLayout(tool_row)
 
-        self.file_list = QListWidget()
-        self.file_list.setFixedHeight(150)
+        self.file_table = QTableWidget(0, 2)
+        self.file_table.setHorizontalHeaderLabels(["结构（勾选）", "PPT 页面标题（可编辑）"])
+        self.file_table.verticalHeader().setVisible(False)
+        self.file_table.setFixedHeight(170)
+        self.file_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.file_table.setEditTriggers(QAbstractItemView.DoubleClicked
+                                        | QAbstractItemView.SelectedClicked
+                                        | QAbstractItemView.EditKeyPressed)
+        hh = self.file_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.Stretch)
+        hh.setSectionResizeMode(1, QHeaderView.Stretch)
         list_wrap = QWidget()
         list_lay = QHBoxLayout(list_wrap)
         list_lay.setContentsMargins(18, 4, 18, 14)
-        list_lay.addWidget(self.file_list)
+        list_lay.addWidget(self.file_table)
         card.layout().addWidget(list_wrap)
 
         # ② 输出设置
@@ -1159,18 +1204,27 @@ class MainWindow(QWidget):
         bnd_wrap = QWidget()
         bnd_lay = QVBoxLayout(bnd_wrap)
         bnd_lay.setContentsMargins(18, 4, 18, 12)
-        bnd_lbl = QLabel("显示边界 BOUND（6 个分数坐标，留空 = 不改）")
+        bnd_lbl = QLabel("显示边界 BOUND（分数坐标区间；a←→x、b←→y、c←→z，留空 = 不改）")
         bnd_lbl.setObjectName("FieldLabel")
         bnd_lay.addWidget(bnd_lbl)
         bnd_grid = QHBoxLayout()
-        bnd_grid.setSpacing(6)
+        bnd_grid.setSpacing(8)
         self.boundary_vars = []
-        for default in ("-0.05", "1.05", "-0.05", "1.05", "-0.05", "1.05"):
-            e = QLineEdit(default)
-            e.setFixedWidth(64)
-            e.setAlignment(Qt.AlignCenter)
-            self.boundary_vars.append(e)
-            bnd_grid.addWidget(e)
+        for axis in ("a", "b", "c"):
+            tag = QLabel(f"{axis} 轴")
+            tag.setObjectName("HintLabel")
+            tag.setFixedWidth(30)
+            bnd_grid.addWidget(tag)
+            for d in ("-0.05", "1.05"):
+                e = QLineEdit(d)
+                e.setFixedWidth(58)
+                e.setAlignment(Qt.AlignCenter)
+                self.boundary_vars.append(e)
+                bnd_grid.addWidget(e)
+            if axis != "c":
+                sp = QLabel("   ")
+                sp.setFixedWidth(10)
+                bnd_grid.addWidget(sp)
         bnd_grid.addStretch(1)
         bnd_lay.addLayout(bnd_grid)
         card.layout().addWidget(bnd_wrap)
@@ -1265,30 +1319,38 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "提示", "请输入一个有效的文件夹路径。")
             return
         self.root_path = Path(root)
-        self.file_list.clear()
+        self.file_table.setRowCount(0)
         found = [p for p in sorted(self.root_path.rglob("*"))
                  if p.is_file() and p.name.upper() == "CONTCAR"]
         for p in found:
             rel = p.relative_to(self.root_path).as_posix()
-            it = QListWidgetItem(rel)
-            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
-            it.setCheckState(Qt.Checked)
-            it.setData(Qt.UserRole, str(p))
-            self.file_list.addItem(it)
+            r = self.file_table.rowCount()
+            self.file_table.insertRow(r)
+            it0 = QTableWidgetItem(rel)
+            it0.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            it0.setCheckState(Qt.Checked)
+            it0.setData(Qt.UserRole, str(p))
+            self.file_table.setItem(r, 0, it0)
+            it1 = QTableWidgetItem(rel)          # 默认标题 = 相对路径，可编辑
+            it1.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
+            it1.setToolTip("可编辑该结构在 PPT 页面上的标题")
+            self.file_table.setItem(r, 1, it1)
         self.scan_info.setText(f"检索到 {len(found)} 个 CONTCAR")
         self._append_log(f"在 {root} 下检索到 {len(found)} 个 CONTCAR 文件。", "info")
         self._refresh_elements()
 
     def _check_all(self, checked):
         state = Qt.Checked if checked else Qt.Unchecked
-        for i in range(self.file_list.count()):
-            self.file_list.item(i).setCheckState(state)
+        for r in range(self.file_table.rowCount()):
+            it = self.file_table.item(r, 0)
+            if it is not None:
+                it.setCheckState(state)
 
     def _collect_elements_from_checked(self):
         elems = []
-        for i in range(self.file_list.count()):
-            it = self.file_list.item(i)
-            if it.checkState() != Qt.Checked:
+        for r in range(self.file_table.rowCount()):
+            it = self.file_table.item(r, 0)
+            if it is None or it.checkState() != Qt.Checked:
                 continue
             for el in parse_contcar_elements(Path(it.data(Qt.UserRole))):
                 if el not in elems:
@@ -1380,11 +1442,12 @@ class MainWindow(QWidget):
     def _on_run(self):
         if self.running:
             return
-        if self.file_list.count() == 0:
+        if self.file_table.rowCount() == 0:
             QMessageBox.warning(self, "提示", "请先输入结构根目录并点击「检索」。")
             return
-        if not any(self.file_list.item(i).checkState() == Qt.Checked
-                   for i in range(self.file_list.count())):
+        if not any(self.file_table.item(r, 0) is not None
+                   and self.file_table.item(r, 0).checkState() == Qt.Checked
+                   for r in range(self.file_table.rowCount())):
             QMessageBox.warning(self, "提示", "请至少勾选一个 CONTCAR 文件。")
             return
         if not _HAS_PPTX:
@@ -1465,9 +1528,9 @@ class MainWindow(QWidget):
             atom_params.append({"atom_name": el, "radius": radius, "color_RGB": color or ""})
 
         files = []
-        for i in range(self.file_list.count()):
-            it = self.file_list.item(i)
-            if it.checkState() != Qt.Checked:
+        for r in range(self.file_table.rowCount()):
+            it = self.file_table.item(r, 0)
+            if it is None or it.checkState() != Qt.Checked:
                 continue
             abspath = Path(it.data(Qt.UserRole))
             rel = None
@@ -1481,11 +1544,13 @@ class MainWindow(QWidget):
             rel_sub = rel.parent.as_posix()
             if rel_sub == ".":
                 rel_sub = ""
+            title_item = self.file_table.item(r, 1)
+            title = (title_item.text().strip() if title_item is not None else "") or rel.as_posix()
             files.append({
                 "path": str(abspath),
                 "rel": rel_sub,
                 "stem": rel.name or abspath.stem,
-                "label": rel.as_posix(),
+                "label": title,
             })
 
         return {
