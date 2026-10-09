@@ -23,6 +23,7 @@ CONTCAR → PPT 批量出图 GUI（iOS 风格 · PySide6）
 from __future__ import annotations
 
 import html as _html
+import math
 import os
 import re
 import shutil
@@ -62,14 +63,14 @@ except Exception:
 
 from PySide6.QtCore import (Qt, QObject, QThread, Signal, Slot, Property,
                             QPropertyAnimation, QEasingCurve, QPointF, QRectF, QTimer)
-from PySide6.QtGui import QPainter, QColor, QFont, QPen, QIcon
+from PySide6.QtGui import QPainter, QColor, QFont, QPen, QIcon, QImage
 from PySide6.QtWidgets import (
     QApplication, QWidget, QFrame, QLabel, QPushButton, QLineEdit, QComboBox,
-    QSpinBox, QDoubleSpinBox, QScrollArea, QVBoxLayout, QHBoxLayout,
-    QProgressBar, QPlainTextEdit, QFileDialog, QMessageBox, QColorDialog,
+    QSpinBox, QDoubleSpinBox, QScrollArea, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QProgressBar, QPlainTextEdit, QFileDialog, QMessageBox,
     QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QAbstractButton, QGraphicsDropShadowEffect, QSizePolicy,
-    QRadioButton, QButtonGroup,
+    QRadioButton, QButtonGroup, QDialog, QSlider,
 )
 
 # 复用核心工具
@@ -112,17 +113,78 @@ _ELEMENT_ORDER = ["H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne",
 
 # 常见元素 Jmol 配色（添加元素时的默认颜色）
 JMOL_COLORS = {
-    "H": "#FFFFFF", "C": "#909090", "N": "#3050F8", "O": "#FF0D0D",
-    "F": "#90E050", "S": "#FFFF30", "Cl": "#1FF01F", "Br": "#A62929",
-    "I": "#940094", "Fe": "#E06633", "Co": "#F090A0", "Ni": "#50D050",
-    "Cu": "#C88033", "Zn": "#7D80B0", "Ti": "#BFC2C7", "V": "#A6A6AB",
-    "Cr": "#8A99C7", "Mn": "#9C7AC4", "Mg": "#8AFF00", "Al": "#BFA6A6",
-    "Si": "#F0C8A0", "P": "#FF8000", "K": "#8F40D4", "Ca": "#3DFF00",
-    "Na": "#AB5CF2", "Li": "#CC80FF", "Mo": "#54B5B5", "W": "#2194D6",
-    "Pt": "#D0D0E0", "Au": "#FFD123", "Ag": "#C0C0C0", "Pb": "#575961",
-    "Zr": "#94E0E0", "Nb": "#73C2C9", "Ru": "#248F8F", "Rh": "#0A7D8C",
-    "Pd": "#006985", "Cd": "#FFD98F", "Sn": "#668080", "Sb": "#9E63B5",
-    "Te": "#D47A00", "Ba": "#00C900", "La": "#70D4FF", "Ce": "#FFFFC7",
+    "H": "#FFFFFF", "He": "#D9FFFF", "Li": "#CC80FF", "Be": "#C2FF00",
+    "B": "#FFB5B5", "C": "#909090", "N": "#3050F8", "O": "#FF0D0D",
+    "F": "#90E050", "Ne": "#B3E3F5", "Na": "#AB5CF2", "Mg": "#8AFF00",
+    "Al": "#BFA6A6", "Si": "#F0C8A0", "P": "#FF8000", "S": "#FFFF30",
+    "Cl": "#1FF01F", "Ar": "#80D1E3", "K": "#8F40D4", "Ca": "#3DFF00",
+    "Sc": "#E6E6E6", "Ti": "#BFC2C7", "V": "#A6A6AB", "Cr": "#8A99C7",
+    "Mn": "#9C7AC4", "Fe": "#E06633", "Co": "#F090A0", "Ni": "#50D050",
+    "Cu": "#C88033", "Zn": "#7D80B0", "Ga": "#C28F8F", "Ge": "#668F8F",
+    "As": "#BD80E3", "Se": "#FFA100", "Br": "#A62929", "Kr": "#5CB8D1",
+    "Rb": "#702EB0", "Sr": "#00FF00", "Y": "#94FFFF", "Zr": "#94E0E0",
+    "Nb": "#73C2C9", "Mo": "#54B5B5", "Tc": "#3B9E9E", "Ru": "#248F8F",
+    "Rh": "#0A7D8C", "Pd": "#006985", "Ag": "#C0C0C0", "Cd": "#FFD98F",
+    "In": "#A67573", "Sn": "#668080", "Sb": "#9E63B5", "Te": "#D47A00",
+    "I": "#940094", "Xe": "#429EB0", "Cs": "#57178F", "Ba": "#00C900",
+    "La": "#70D4FF", "Ce": "#FFFFC7", "Pr": "#D9FFC7", "Nd": "#C7FFC7",
+    "Pm": "#A3FFC7", "Sm": "#8FFFC7", "Eu": "#61FFC7", "Gd": "#45FFC7",
+    "Tb": "#30FFC7", "Dy": "#1FFFC7", "Ho": "#00FF9C", "Er": "#00E675",
+    "Tm": "#00D452", "Yb": "#00BF38", "Lu": "#00AB24", "Hf": "#4DC2FF",
+    "Ta": "#4DA6FF", "W": "#2194D6", "Re": "#267DAB", "Os": "#266696",
+    "Ir": "#175487", "Pt": "#D0D0E0", "Au": "#FFD123", "Hg": "#B8B8D0",
+    "Tl": "#A6544D", "Pb": "#575961", "Bi": "#9E4FB5", "Po": "#AB5C00",
+    "At": "#754F45", "Rn": "#428296",
+}
+
+# CPK（Corey–Pauling–Koltun）经典配色；未列出的元素用中性灰
+_CPK_NEUTRAL = "#808090"
+CPK_COLORS = {
+    "H": "#FFFFFF", "He": "#FFC0CB", "Li": "#8000FF", "Be": "#00FF00",
+    "B": "#00FF00", "C": "#C8C8C8", "N": "#8F8FFF", "O": "#F00000",
+    "F": "#00FF00", "Ne": "#FF1493", "Na": "#8000FF", "Mg": "#00FF00",
+    "Al": "#808090", "Si": "#C0C0C0", "P": "#FFA500", "S": "#FFC832",
+    "Cl": "#00FF00", "Ar": "#00FFFF", "K": "#8000FF", "Ca": "#808090",
+    "Fe": "#FFA500", "As": "#A020F0", "Se": "#FFA100", "Br": "#A52A2A",
+    "Kr": "#00FFFF", "Rb": "#8000FF", "Sr": "#808090", "Sb": "#A020F0",
+    "Te": "#FFA100", "I": "#A020F0", "Xe": "#00FFFF", "Cs": "#8000FF",
+    "Ba": "#808090",
+}
+for _el in _ELEMENT_ORDER:
+    CPK_COLORS.setdefault(_el, _CPK_NEUTRAL)
+del _el
+
+# VESTA 默认元素配色（由 VESTA elements.ini 标定）
+VESTA_COLORS = {
+    "H": "#FFCCCC", "He": "#FCE9CF", "Li": "#86E074", "Be": "#5FD87B",
+    "B": "#20A20F", "C": "#814929", "N": "#B0BAE6", "O": "#FF0300",
+    "F": "#B0BAE6", "Ne": "#FF38B5", "Na": "#FADD3D", "Mg": "#FC7C16",
+    "Al": "#81B3D6", "Si": "#1B3BFA", "P": "#C19CC3", "S": "#FFFA00",
+    "Cl": "#32FC03", "Ar": "#CFFEC5", "K": "#A122F7", "Ca": "#5B96BE",
+    "Sc": "#B663AC", "Ti": "#78CAFF", "V": "#E61A00", "Cr": "#00009E",
+    "Mn": "#A9099E", "Fe": "#B57200", "Co": "#0000AF", "Ni": "#B8BCBE",
+    "Cu": "#2247DD", "Zn": "#8F9082", "Ga": "#9FE474", "Ge": "#7E6FA6",
+    "As": "#75D057", "Se": "#9AEF10", "Br": "#7F3103", "Kr": "#FAC1F3",
+    "Rb": "#FF0099", "Sr": "#00FF27", "Y": "#67988E", "Zr": "#00FF00",
+    "Nb": "#4CB376", "Mo": "#B486B0", "Tc": "#CDAFCB", "Ru": "#CFB8AE",
+    "Rh": "#CED2AB", "Pd": "#C2C4B9", "Ag": "#B8BCBE", "Cd": "#F31FDC",
+    "In": "#D781BB", "Sn": "#9B8FBA", "Sb": "#D88350", "Te": "#ADA252",
+    "I": "#8F1F8B", "Xe": "#9BA1F8", "Cs": "#0FFFB9", "Ba": "#1EF02D",
+    "La": "#5AC449", "Ce": "#D1FD06", "Pr": "#FDE206", "Nd": "#FC8E07",
+    "Pm": "#0000F5", "Sm": "#FD067D", "Eu": "#FB08D5", "Gd": "#C004FF",
+    "Tb": "#7104FE", "Dy": "#3106FD", "Ho": "#0742FB", "Er": "#49733B",
+    "Tm": "#0000E0", "Yb": "#27FDF4", "Lu": "#26FDB5", "Hf": "#B4B459",
+    "Ta": "#B79B56", "W": "#8E8A80", "Re": "#B3B18E", "Os": "#C9B179",
+    "Ir": "#C9CF73", "Pt": "#CCC6BF", "Au": "#FEB338", "Hg": "#D3B8CC",
+    "Tl": "#96896D", "Pb": "#53535B", "Bi": "#D230F8", "Po": "#0000FF",
+    "At": "#0000FF", "Rn": "#FFFF00",
+}
+
+# 可选配色方案（供取色弹窗使用）
+COLOR_SCHEMES = {
+    "Jmol": JMOL_COLORS,
+    "CPK": CPK_COLORS,
+    "VESTA": VESTA_COLORS,
 }
 
 # ---------------------------------------------------------------------------
@@ -257,6 +319,92 @@ def make_ball_png(rgb, path: Path, size: int = 256):
     img = Image.fromarray(col.astype(np.uint8), "RGBA").resize((size, size), Image.LANCZOS)
     img.save(path)
     return path
+
+
+# 单原子 POSCAR 模板（供 VESTA 渲染图例球使用）
+_SINGLE_ATOM_POSCAR = (
+    "legend single atom\n1.0\n"
+    "  {cell} 0.0 0.0\n  0.0 {cell} 0.0\n  0.0 0.0 {cell}\n"
+    "{el}\n1\nDirect\n0.5 0.5 0.5\n"
+)
+# 保持较小的场景缩放与“刚好包住原子”的晶胞，使光照与结构图完全一致
+_LEGEND_SCALE_FRAC = 2.0
+_LEGEND_EXPORT_SCALE = 3.0
+
+
+def _crop_ball_png(geo_png: Path, real_png: Path, out: Path,
+                   pad: float = 0.06, size: int = 256) -> Path:
+    """按几何参考图的原子包围盒裁剪实色图，输出方形原子球 PNG（白底）。
+
+    几何参考图用黑色原子渲染，因此白色 / 浅色原子也能准确定位包围盒。
+    """
+    if Image is None:
+        shutil.copy(real_png, out)
+        return out
+    try:
+        geo = Image.open(geo_png).convert("L")
+        bbox = geo.point(lambda v: 0 if v >= 250 else 255).getbbox()
+        im = Image.open(real_png).convert("RGB")
+        if not bbox:
+            im.resize((size, size)).save(out)
+            return out
+        x0, y0, x1, y1 = bbox
+        side = max(8, int(max(x1 - x0, y1 - y0) * (1 + 2 * pad)))
+        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        left, top = int(round(cx - side / 2.0)), int(round(cy - side / 2.0))
+        canvas = Image.new("RGB", (side, side), (255, 255, 255))
+        src = im.crop((max(0, left), max(0, top),
+                       min(im.width, left + side), min(im.height, top + side)))
+        canvas.paste(src, (max(0, -left), max(0, -top)))
+        canvas.resize((size, size), Image.LANCZOS).save(out)
+    except Exception:
+        shutil.copy(real_png, out)
+    return out
+
+
+def render_legend_ball(v, item, work_dir: Path, index: int) -> Path:
+    """用 VESTA 渲染单个原子球，作为图例 ball。
+
+    使用与结构图完全相同的 VESTA 渲染 / 光照条件，套用该元素在结构中的
+    实际颜色与半径，因此图例球与结构图里的原子样式一致。
+    """
+    el = str(item["element"])
+    r, g, b = item["rgb"]
+    try:
+        radius = float(item.get("radius") or ELEMENTS_RADIUS.get(el, 1.4))
+    except Exception:
+        radius = float(ELEMENTS_RADIUS.get(el, 1.4))
+    cell = max(3.0, 2.0 * radius + 0.8)
+    scale_frac = _LEGEND_SCALE_FRAC
+    stem = f"legend_{index}_{el}"
+
+    poscar = work_dir / f"{stem}.vasp"
+    poscar.write_text(_SINGLE_ATOM_POSCAR.format(el=el, cell=f"{cell:.4f}"),
+                      encoding="utf-8")
+    base = work_dir / f"{stem}.vesta"
+    v.contcar_to_vesta(poscar, base)
+    v.modify_vesta(base, comps="OFF", ucolp="OFF", sbond="OFF")
+
+    # 1) 几何参考图（黑色原子）→ 确定原子包围盒
+    geo = work_dir / f"{stem}_geo.vesta"
+    shutil.copy(base, geo)
+    v.modify_vesta(geo, atom_params=[{"atom_name": el, "radius": f"{radius:.4f}",
+                                      "color_RGB": "0 0 0"}])
+    v.modify_vesta(geo, version=view_matrix(TOP), scale_frac=scale_frac)
+    geo_png = work_dir / f"{stem}_geo.png"
+    v.export_image(geo, geo_png, scale=_LEGEND_EXPORT_SCALE)
+
+    # 2) 实际颜色图
+    real = work_dir / f"{stem}_real.vesta"
+    shutil.copy(base, real)
+    v.modify_vesta(real, atom_params=[{"atom_name": el, "radius": f"{radius:.4f}",
+                                       "color_RGB": f"{r} {g} {b}"}])
+    v.modify_vesta(real, version=view_matrix(TOP), scale_frac=scale_frac)
+    real_png = work_dir / f"{stem}_real.png"
+    v.export_image(real, real_png, scale=_LEGEND_EXPORT_SCALE)
+
+    ball = work_dir / f"{stem}.png"
+    return _crop_ball_png(geo_png, real_png, ball)
 
 
 # ---------------------------------------------------------------------------
@@ -529,9 +677,12 @@ def add_legend_slide(prs, blank, legend, s):
             cx = 0.7 + col * cell_w + cell_w / 2
             cy = start_y + row * cell_h
 
-            ball_path = tmp / f"{i}_{item['element']}.png"
-            make_ball_png(item["rgb"], ball_path, size=256)
-            if ball_path.exists():
+            ball_path = item.get("ball")
+            if not (ball_path and Path(ball_path).exists()):
+                # 回退：内置 PIL 渲染（VESTA 渲染失败时）
+                ball_path = tmp / f"{i}_{item['element']}.png"
+                make_ball_png(item["rgb"], ball_path, size=256)
+            if ball_path and Path(ball_path).exists():
                 sl.shapes.add_picture(str(ball_path), Inches(cx - ball_in / 2),
                                       Inches(cy), Inches(ball_in), Inches(ball_in))
             else:
@@ -720,6 +871,17 @@ def run_batch(s, log, progress, stop_event, pause_event=None):
         if stop_event.is_set():
             return False, "已停止（未生成完整 PPT）。"
 
+        # 用 VESTA 渲染图例原子球（与结构图同光照 / 同原子样式）
+        if s["legend"] and legend:
+            log("info", "正在用 VESTA 渲染图例原子球…")
+            for i, item in enumerate(legend):
+                if stop_event.is_set():
+                    break
+                try:
+                    item["ball"] = str(render_legend_ball(v, item, tmpdir, i))
+                except Exception as exc:  # noqa: BLE001
+                    log("warn", f"    图例球渲染失败（{item.get('element')}）：{exc}")
+
         log("info", "正在生成 PPT…")
         build_pptx(pptx_path, slides, legend, s)
         done += 1
@@ -747,6 +909,7 @@ QLabel#CardTitle { font-size: 14px; font-weight: 600; color: #1C1C1E; background
 QLabel#CardSubtitle { font-size: 11px; color: #6E6E73; background: transparent; }
 QLabel#FieldLabel { font-size: 13px; color: #1C1C1E; background: transparent; }
 QLabel#HintLabel { font-size: 11px; color: #6E6E73; background: transparent; }
+QLabel#FieldLabel:disabled, QLabel#HintLabel:disabled { color: #C7C7CC; }
 
 QRadioButton { color: #1C1C1E; font-size: 13px; background: transparent; spacing: 6px; }
 QRadioButton::indicator { width: 15px; height: 15px; }
@@ -771,6 +934,12 @@ QComboBox QAbstractItemView {
     background: #FFFFFF; border: 1px solid #E3E5EA; border-radius: 10px;
     padding: 4px; selection-background-color: #EAF3FF; selection-color: #0A84FF;
 }
+QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {
+    background: #F2F2F4; color: #B4B4B9; border: 1px solid #E8E8EC;
+}
+QLineEdit:disabled:hover, QSpinBox:disabled:hover,
+QDoubleSpinBox:disabled:hover, QComboBox:disabled:hover { border: 1px solid #E8E8EC; }
+QRadioButton:disabled { color: #C7C7CC; }
 
 QListWidget { background: #F8F8FA; border: 1px solid #D9D9DE; border-radius: 10px;
               padding: 4px; font-size: 12px; color: #1C1C1E; }
@@ -828,6 +997,20 @@ QPlainTextEdit QScrollBar:vertical { background: #2C2C2E; width: 8px; }
 QPlainTextEdit QScrollBar::handle:vertical { background: #5A5A5E; }
 QPlainTextEdit QScrollBar::handle:vertical:hover { background: #6E6E73; }
 QPlainTextEdit QScrollBar::add-line:vertical, QPlainTextEdit QScrollBar::sub-line:vertical { height: 0px; }
+
+/* 取色弹窗 */
+QDialog { background: #FFFFFF; }
+QLabel#DlgTitle { font-size: 16px; font-weight: 700; color: #1C1C1E; background: transparent; }
+QLabel#PreviewSwatch { border: 1px solid #D9D9DE; border-radius: 12px; }
+QPushButton#MiniBtn { background: #F2F2F7; color: #0A84FF; border: 1px solid #D9D9DE;
+                      border-radius: 8px; padding: 0 10px; font-size: 12px; }
+QPushButton#MiniBtn:hover { background: #EAF3FF; border-color: #0A84FF; }
+QSlider::groove:horizontal { height: 6px; background: #E5E5EA; border-radius: 3px; }
+QSlider::sub-page:horizontal { background: #0A84FF; border-radius: 3px; }
+QSlider::add-page:horizontal { background: #E5E5EA; border-radius: 3px; }
+QSlider::handle:horizontal { width: 16px; margin: -6px 0; border-radius: 8px;
+                             background: #FFFFFF; border: 1px solid #D9D9DE; }
+QSlider::handle:horizontal:hover { border: 1px solid #0A84FF; }
 """
 
 
@@ -869,15 +1052,364 @@ class Toggle(QAbstractButton):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
-        track = QColor(GREEN) if self.isChecked() else QColor("#D1D1D6")
+        enabled = self.isEnabled()
+        if not enabled:
+            track = QColor("#E5E5EA")
+            thumb = QColor("#F7F7F9")
+            shadow = QColor(0, 0, 0, 8)
+        else:
+            track = QColor(GREEN) if self.isChecked() else QColor("#D1D1D6")
+            thumb = QColor("#FFFFFF")
+            shadow = QColor(0, 0, 0, 18)
         p.setPen(Qt.NoPen)
         p.setBrush(track)
         p.drawRoundedRect(QRectF(0, h / 2 - 13, w, 26), 13, 13)
         # 滑块阴影 + 滑块
-        p.setBrush(QColor(0, 0, 0, 18))
+        p.setBrush(shadow)
         p.drawEllipse(QPointF(self._thumb + 13, h / 2 + 1), 11.5, 11.5)
-        p.setBrush(QColor("#FFFFFF"))
+        p.setBrush(thumb)
+        if enabled:
+            p.setPen(Qt.NoPen)
+        else:
+            p.setPen(QPen(QColor("#DCDCE1")))
         p.drawEllipse(QPointF(self._thumb + 13, h / 2), 11, 11)
+
+
+# ---------------------------------------------------------------------------
+# 原子颜色选择弹窗（中文 · 色轮 + 常用元素配色方案）
+# ---------------------------------------------------------------------------
+class ColorWheel(QWidget):
+    """HSV 色轮：角度 = 色相，半径 = 饱和度，明度由外部滑块控制。"""
+
+    colorChanged = Signal(QColor)
+
+    def __init__(self, color=None, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(190, 190)
+        self.setCursor(Qt.CrossCursor)
+        self._h, self._s, self._v = 0.0, 1.0, 1.0
+        self._wheel = None
+        self._wheel_v = None
+        if color is not None:
+            self.set_color(color)
+
+    def color(self) -> QColor:
+        return QColor.fromHsvF(self._h, self._s, self._v)
+
+    def set_color(self, color: QColor) -> None:
+        h, s, v, _ = QColor(color).getHsvF()
+        self._h = 0.0 if (h is None or h < 0) else float(h)
+        self._s = float(s)
+        self._v = float(v)
+        self.update()
+
+    def set_value(self, v: float) -> None:
+        self._v = max(0.0, min(1.0, float(v)))
+        self.update()
+
+    def value(self) -> float:
+        return self._v
+
+    def _radius(self) -> float:
+        return self.width() / 2.0 - 3.0
+
+    def _ensure_wheel(self):
+        """按当前明度生成/缓存色轮位图。"""
+        if self._wheel is not None and self._wheel_v == self._v:
+            return
+        if np is None:
+            self._wheel = None
+            return
+        S = self.width()
+        yy, xx = np.mgrid[0:S, 0:S]
+        c = (S - 1) / 2.0
+        rad = self._radius()
+        dx = (xx - c) / rad
+        dy = (yy - c) / rad
+        r = np.sqrt(dx * dx + dy * dy)
+        hue = (np.arctan2(dy, dx) / (2.0 * np.pi)) % 1.0
+        sat = np.clip(r, 0.0, 1.0)
+        v = self._v
+        i = np.floor(hue * 6.0)
+        f = hue * 6.0 - i
+        p = v * (1.0 - sat)
+        q = v * (1.0 - f * sat)
+        t = v * (1.0 - (1.0 - f) * sat)
+        i = i.astype(np.int32) % 6
+        conds = [i == 0, i == 1, i == 2, i == 3, i == 4, i == 5]
+        rch = np.select(conds, [v, q, p, p, t, v])
+        gch = np.select(conds, [t, v, v, q, p, p])
+        bch = np.select(conds, [p, p, t, v, v, q])
+        arr = np.zeros((S, S, 4), dtype=np.uint8)
+        arr[..., 0] = np.clip(rch * 255, 0, 255).astype(np.uint8)
+        arr[..., 1] = np.clip(gch * 255, 0, 255).astype(np.uint8)
+        arr[..., 2] = np.clip(bch * 255, 0, 255).astype(np.uint8)
+        arr[..., 3] = np.where(r <= 1.0, 255, 0).astype(np.uint8)
+        arr = np.ascontiguousarray(arr)
+        data = arr.tobytes()
+        img = QImage(data, S, S, 4 * S, QImage.Format_RGBA8888)
+        self._wheel = img.copy()
+        self._wheel_v = v
+
+    def paintEvent(self, event):
+        self._ensure_wheel()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        if self._wheel is not None:
+            p.drawImage(0, 0, self._wheel)
+        else:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor("#DDDDE2"))
+            p.drawEllipse(self.rect().adjusted(3, 3, -3, -3))
+        # 当前颜色位置标记
+        c = (self.width() - 1) / 2.0
+        rad = self._radius()
+        ang = self._h * 2.0 * math.pi
+        mx = c + math.cos(ang) * self._s * rad
+        my = c + math.sin(ang) * self._s * rad
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(255, 255, 255, 230), 4))
+        p.drawEllipse(QPointF(mx, my), 7, 7)
+        p.setPen(QPen(QColor(28, 28, 30), 2))
+        p.drawEllipse(QPointF(mx, my), 7, 7)
+
+    def _pick(self, pos: QPointF):
+        c = (self.width() - 1) / 2.0
+        rad = self._radius()
+        dx = (pos.x() - c) / rad
+        dy = (pos.y() - c) / rad
+        r = math.hypot(dx, dy)
+        self._s = max(0.0, min(1.0, r))
+        if r > 1e-6:
+            self._h = (math.atan2(dy, dx) / (2.0 * math.pi)) % 1.0
+        self.update()
+        self.colorChanged.emit(self.color())
+
+    def mousePressEvent(self, e):
+        self._pick(e.position())
+
+    def mouseMoveEvent(self, e):
+        if e.buttons() & Qt.LeftButton:
+            self._pick(e.position())
+
+
+class ColorPickerDialog(QDialog):
+    """中文原子颜色选择弹窗：色轮 + 明度 + 常用配色方案调色板。"""
+
+    def __init__(self, initial: QColor, element: str = "", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("选择原子颜色")
+        self.setModal(True)
+        self.setMinimumWidth(560)
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+        self._element = (element or "").strip()
+        self._scheme = "Jmol"
+        init = QColor(initial)
+        self._color = init if init.isValid() else QColor("#FF0000")
+        self._updating = False
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 16)
+        root.setSpacing(12)
+
+        title = QLabel("选择原子颜色" + (f" · {self._element}" if self._element else ""))
+        title.setObjectName("DlgTitle")
+        root.addWidget(title)
+
+        body = QHBoxLayout()
+        body.setSpacing(18)
+        root.addLayout(body, 1)
+
+        # ---- 左：色轮 + 明度 ----------------------------------------
+        left = QVBoxLayout()
+        left.setSpacing(8)
+        self.wheel = ColorWheel(self._color)
+        left.addWidget(self.wheel, 0, Qt.AlignHCenter)
+        vrow = QHBoxLayout()
+        vl = QLabel("明度")
+        vl.setObjectName("FieldLabel")
+        vrow.addWidget(vl)
+        self.value_slider = QSlider(Qt.Horizontal)
+        self.value_slider.setRange(0, 100)
+        self.value_slider.setValue(int(round(self._color.valueF() * 100)))
+        vrow.addWidget(self.value_slider, 1)
+        left.addLayout(vrow)
+        left.addStretch(1)
+        body.addLayout(left, 0)
+
+        # ---- 右：预览 / 输入 / 配色方案 ------------------------------
+        right = QVBoxLayout()
+        right.setSpacing(10)
+
+        prev = QHBoxLayout()
+        prev.setSpacing(10)
+        self.preview = QLabel()
+        self.preview.setFixedSize(58, 58)
+        self.preview.setObjectName("PreviewSwatch")
+        prev.addWidget(self.preview)
+        fields = QVBoxLayout()
+        fields.setSpacing(6)
+        for tag, attr in (("HEX", "hex_edit"), ("RGB", "rgb_edit")):
+            row = QHBoxLayout()
+            lab = QLabel(tag)
+            lab.setObjectName("HintLabel")
+            lab.setFixedWidth(32)
+            row.addWidget(lab)
+            edit = QLineEdit()
+            edit.setFixedWidth(120)
+            setattr(self, attr, edit)
+            row.addWidget(edit)
+            row.addStretch(1)
+            fields.addLayout(row)
+        prev.addLayout(fields)
+        prev.addStretch(1)
+        right.addLayout(prev)
+
+        srow = QHBoxLayout()
+        sl = QLabel("配色方案")
+        sl.setObjectName("FieldLabel")
+        srow.addWidget(sl)
+        self.scheme_combo = QComboBox()
+        self.scheme_combo.addItems(list(COLOR_SCHEMES.keys()))
+        self.scheme_combo.setCurrentText(self._scheme)
+        srow.addWidget(self.scheme_combo)
+        self.default_btn = QPushButton("本元素默认色")
+        self.default_btn.setObjectName("MiniBtn")
+        self.default_btn.setCursor(Qt.PointingHandCursor)
+        self.default_btn.setFixedHeight(28)
+        srow.addWidget(self.default_btn)
+        srow.addStretch(1)
+        right.addLayout(srow)
+
+        hint = QLabel("点击下方色块快速取色（色块文字为元素符号）")
+        hint.setObjectName("HintLabel")
+        right.addWidget(hint)
+
+        self.palette_host = QWidget()
+        self.palette_grid = QGridLayout(self.palette_host)
+        self.palette_grid.setContentsMargins(2, 2, 2, 2)
+        self.palette_grid.setSpacing(5)
+        pal_scroll = QScrollArea()
+        pal_scroll.setWidgetResizable(True)
+        pal_scroll.setWidget(self.palette_host)
+        pal_scroll.setMinimumHeight(210)
+        right.addWidget(pal_scroll, 1)
+        body.addLayout(right, 1)
+
+        # ---- 底部按钮 ------------------------------------------------
+        btns = QHBoxLayout()
+        btns.addStretch(1)
+        cancel = QPushButton("取消")
+        cancel.setObjectName("Pill")
+        cancel.setProperty("variant", "gray")
+        cancel.setFixedHeight(36)
+        cancel.setCursor(Qt.PointingHandCursor)
+        ok = QPushButton("确定")
+        ok.setObjectName("Pill")
+        ok.setProperty("variant", "accent")
+        ok.setFixedHeight(36)
+        ok.setCursor(Qt.PointingHandCursor)
+        btns.addWidget(cancel)
+        btns.addWidget(ok)
+        root.addLayout(btns)
+
+        # ---- 信号 ----------------------------------------------------
+        self.wheel.colorChanged.connect(self._on_wheel)
+        self.value_slider.valueChanged.connect(self._on_value)
+        self.hex_edit.editingFinished.connect(self._on_hex)
+        self.rgb_edit.editingFinished.connect(self._on_rgb)
+        self.scheme_combo.currentTextChanged.connect(self._on_scheme)
+        self.default_btn.clicked.connect(self._reset_default)
+        cancel.clicked.connect(self.reject)
+        ok.clicked.connect(self.accept)
+
+        self._build_palette()
+        self._apply_color(self._color)
+
+    # ------------------------------------------------------------------ #
+    def color(self) -> QColor:
+        return QColor(self._color)
+
+    def _apply_color(self, qc: QColor, sync_wheel: bool = True):
+        if not qc.isValid():
+            return
+        self._color = QColor(qc)
+        self._updating = True
+        if sync_wheel:
+            self.wheel.set_color(self._color)
+        self.value_slider.setValue(int(round(self._color.valueF() * 100)))
+        self.hex_edit.setText(self._color.name().upper())
+        self.rgb_edit.setText(f"{self._color.red()} {self._color.green()} {self._color.blue()}")
+        self.preview.setStyleSheet(
+            "QLabel#PreviewSwatch{background:%s; border:1px solid #D9D9DE; border-radius:12px;}"
+            % self._color.name())
+        self._updating = False
+
+    def _on_wheel(self, qc: QColor):
+        if not self._updating:
+            self._apply_color(qc, sync_wheel=False)
+
+    def _on_value(self, val: int):
+        if self._updating:
+            return
+        self.wheel.set_value(val / 100.0)
+        self._apply_color(self.wheel.color(), sync_wheel=False)
+
+    def _on_hex(self):
+        if self._updating:
+            return
+        qc = QColor(self.hex_edit.text().strip())
+        self._apply_color(qc if qc.isValid() else self._color)
+
+    def _on_rgb(self):
+        if self._updating:
+            return
+        rgb = parse_color(self.rgb_edit.text())
+        if rgb:
+            r, g, b = (int(x) for x in rgb.split())
+            self._apply_color(QColor(r, g, b))
+        else:
+            self._apply_color(self._color)
+
+    def _on_scheme(self, name: str):
+        self._scheme = name
+        self._build_palette()
+
+    def _default_color(self, el: str) -> str:
+        return (COLOR_SCHEMES.get(self._scheme, {}).get(el)
+                or JMOL_COLORS.get(el) or "#909090")
+
+    def _reset_default(self):
+        if self._element:
+            self._apply_color(QColor(self._default_color(self._element)))
+
+    @staticmethod
+    def _swatch_style(hexv: str, current: bool = False) -> str:
+        qc = QColor(hexv)
+        lum = 0.299 * qc.red() + 0.587 * qc.green() + 0.114 * qc.blue()
+        fg = "#1C1C1E" if lum > 150 else "#FFFFFF"
+        border = "#0A84FF" if current else "rgba(0,0,0,0.12)"
+        width = 2 if current else 1
+        return (f"QPushButton{{background:{hexv}; color:{fg}; border:{width}px solid {border};"
+                "border-radius:8px; font-size:11px; font-weight:600;}"
+                "QPushButton:hover{border:2px solid #0A84FF;}")
+
+    def _build_palette(self):
+        while self.palette_grid.count():
+            item = self.palette_grid.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        cols = 8
+        for idx, el in enumerate(_ELEMENT_ORDER):
+            hexv = self._default_color(el)
+            btn = QPushButton(el)
+            btn.setFixedSize(36, 32)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setToolTip(f"{el} · {hexv}")
+            btn.setStyleSheet(self._swatch_style(hexv, el == self._element))
+            btn.clicked.connect(lambda _=False, c=hexv: self._apply_color(QColor(c)))
+            self.palette_grid.addWidget(btn, idx // cols, idx % cols)
 
 
 class NoWheelComboBox(QComboBox):
@@ -1040,6 +1572,10 @@ class MainWindow(QWidget):
         self.worker = None
         self.root_path = None
         self.atom_rows: list[dict] = []
+        # 开关关闭时需要置灰并禁用的控件（按分区）
+        self._section_widgets: dict[str, list] = {"view": [], "display": [], "atom": []}
+        self._out_dir_touched = False
+        self._ppt_touched = False
 
         # 外层透明留白（给窗口阴影）
         outer = QVBoxLayout(self)
@@ -1074,6 +1610,9 @@ class MainWindow(QWidget):
         root_lay.addWidget(self.scroll, 1)
 
         self._build_sections()
+        self._set_group_enabled("view", self.apply_view_var.isChecked())
+        self._set_group_enabled("display", self.apply_display_var.isChecked())
+        self._set_group_enabled("atom", self.apply_atom_style_var.isChecked())
 
     # ------------------------------------------------------------------ #
     # 控件工厂
@@ -1139,7 +1678,7 @@ class MainWindow(QWidget):
         self.body_lay.addWidget(card)
         return card
 
-    def _row(self, card, label, widget):
+    def _row(self, card, label, widget, group=None):
         h = QHBoxLayout()
         h.setContentsMargins(18, 6, 18, 6)
         lbl = QLabel(label)
@@ -1148,6 +1687,13 @@ class MainWindow(QWidget):
         h.addStretch(1)
         h.addWidget(widget, 0, Qt.AlignVCenter)
         card.layout().addLayout(h)
+        if group:
+            self._section_widgets.setdefault(group, []).extend([lbl, widget])
+
+    def _set_group_enabled(self, group: str, enabled: bool) -> None:
+        """启用/禁用某分区的控件（关闭处理开关时置灰）。"""
+        for w in self._section_widgets.get(group, []):
+            w.setEnabled(enabled)
 
     # ------------------------------------------------------------------ #
     # 各分区
@@ -1255,7 +1801,9 @@ class MainWindow(QWidget):
         lbl = QLabel("输出目录")
         lbl.setObjectName("FieldLabel")
         out_row.addWidget(lbl)
-        self.out_dir = QLineEdit(str(Path.cwd() / "ppt_output"))
+        self.out_dir = QLineEdit(str(Path.cwd()))
+        self.out_dir.setPlaceholderText("默认与结构根目录一致")
+        self.out_dir.textEdited.connect(lambda *_: self._mark_out_dir_touched())
         out_row.addWidget(self.out_dir, 1)
         browse = self._pill("浏览", "gray", height=30)
         browse.clicked.connect(self._browse_outdir)
@@ -1267,7 +1815,9 @@ class MainWindow(QWidget):
         lbl = QLabel("PPT 保存路径")
         lbl.setObjectName("FieldLabel")
         ppt_row.addWidget(lbl)
-        self.ppt_path = QLineEdit(str(Path.cwd() / "ppt_output" / "structures.pptx"))
+        self.ppt_path = QLineEdit(str(Path.cwd() / "structures.pptx"))
+        self.ppt_path.setPlaceholderText("默认生成在结构根目录中")
+        self.ppt_path.textEdited.connect(lambda *_: self._mark_ppt_touched())
         ppt_row.addWidget(self.ppt_path, 1)
         pb = self._pill("浏览", "gray", height=30)
         pb.clicked.connect(self._browse_ppt)
@@ -1296,30 +1846,34 @@ class MainWindow(QWidget):
         self._section_label("③  视图设置")
         card = self._card("俯视图 / 侧视图")
         self._row(card, "启用视图设置处理", self._toggle(True, "apply_view_var"))
-        self._row(card, "生成俯视图（沿 c 轴）", self._toggle(True, "do_top_var"))
-        self._row(card, "生成侧视图（c 轴竖直）", self._toggle(True, "do_side_var"))
-        self._row(card, "侧视方向", self._combo(["沿 b 轴看", "沿 a 轴看"], 130, "side_dir_var"))
-        self._row(card, "额外旋转 X (°)", self._dspin(0, -180, 180, 84, 0, "rot_x_var"))
-        self._row(card, "额外旋转 Y (°)", self._dspin(0, -180, 180, 84, 0, "rot_y_var"))
-        self._row(card, "额外旋转 Z (°)", self._dspin(0, -180, 180, 84, 0, "rot_z_var"))
-        self._row(card, "模型占图片比例", self._dspin(0.8, 0.3, 0.95, 84, 2, "model_frac_var"))
+        self._row(card, "生成俯视图（沿 c 轴）", self._toggle(True, "do_top_var"), group="view")
+        self._row(card, "生成侧视图（c 轴竖直）", self._toggle(True, "do_side_var"), group="view")
+        self._row(card, "侧视方向", self._combo(["沿 b 轴看", "沿 a 轴看"], 130, "side_dir_var"), group="view")
+        self._row(card, "额外旋转 X (°)", self._dspin(0, -180, 180, 84, 0, "rot_x_var"), group="view")
+        self._row(card, "额外旋转 Y (°)", self._dspin(0, -180, 180, 84, 0, "rot_y_var"), group="view")
+        self._row(card, "额外旋转 Z (°)", self._dspin(0, -180, 180, 84, 0, "rot_z_var"), group="view")
+        self._row(card, "模型占图片比例", self._dspin(0.8, 0.3, 0.95, 84, 2, "model_frac_var"), group="view")
         self._row(card, "模型放大方式", self._combo(
-            ["裁剪留白（推荐）", "VESTA 缩放", "裁剪 + VESTA 缩放"], 180, "model_fit_var"))
+            ["裁剪留白（推荐）", "VESTA 缩放", "裁剪 + VESTA 缩放"], 180, "model_fit_var"), group="view")
         self._row(card, "图片排版", self._combo(
-            ["同页并排（俯视+侧视）", "每页一张（约占页面 80%）"], 230, "slide_layout_var"))
-        self._row(card, "图片占页面比例", self._dspin(0.8, 0.4, 0.95, 84, 2, "img_frac_var"))
+            ["同页并排（俯视+侧视）", "每页一张（约占页面 80%）"], 230, "slide_layout_var"), group="view")
+        self._row(card, "图片占页面比例", self._dspin(0.8, 0.4, 0.95, 84, 2, "img_frac_var"), group="view")
+        self.apply_view_var.toggled.connect(
+            lambda c: self._set_group_enabled("view", c))
 
         # ④ VESTA 显示
         self._section_label("④  VESTA 显示选项")
         card = self._card("结构显示（对应 .vesta 各段）")
         self._row(card, "启用 VESTA 显示选项处理", self._toggle(True, "apply_display_var"))
-        self._row(card, "显示晶胞坐标轴 COMPS", self._toggle(False, "comps_var"))
-        self._row(card, "显示晶胞边界 UCOLP", self._toggle(True, "ucolp_var"))
-        self._row(card, "生成化学键 SBOND", self._toggle(True, "sbond_var"))
-        self._row(card, "成键容差 padding (Å)", self._line("0.5", 84, "sbond_padding_var"))
-        self._row(card, "场景缩放 scale_frac", self._line("1.0", 84, "scale_frac_var"))
-        self._row(card, "水平平移 x_move", self._line("0.0", 84, "x_move_var"))
-        self._row(card, "垂直平移 y_move", self._line("0.0", 84, "y_move_var"))
+        self._row(card, "显示晶胞坐标轴 COMPS", self._toggle(False, "comps_var"), group="display")
+        self._row(card, "显示晶胞边界 UCOLP", self._toggle(True, "ucolp_var"), group="display")
+        self._row(card, "生成化学键 SBOND", self._toggle(True, "sbond_var"), group="display")
+        self._row(card, "成键容差 padding (Å)", self._line("0.5", 84, "sbond_padding_var"), group="display")
+        self._row(card, "场景缩放 scale_frac", self._line("1.0", 84, "scale_frac_var"), group="display")
+        self._row(card, "水平平移 x_move", self._line("0.0", 84, "x_move_var"), group="display")
+        self._row(card, "垂直平移 y_move", self._line("0.0", 84, "y_move_var"), group="display")
+        self.apply_display_var.toggled.connect(
+            lambda c: self._set_group_enabled("display", c))
 
         bnd_wrap = QWidget()
         bnd_lay = QVBoxLayout(bnd_wrap)
@@ -1350,6 +1904,7 @@ class MainWindow(QWidget):
         bnd_grid.addStretch(1)
         bnd_lay.addLayout(bnd_grid)
         card.layout().addWidget(bnd_wrap)
+        self._section_widgets["display"].append(bnd_wrap)
 
         # ⑤ 原子样式
         self._section_label("⑤  原子半径 / 颜色（留空则用 VESTA 默认）")
@@ -1364,6 +1919,7 @@ class MainWindow(QWidget):
             h.setObjectName("HintLabel")
             h.setFixedWidth(w)
             head.addWidget(h)
+            self._section_widgets["atom"].append(h)
         head.addStretch(1)
         card.layout().addLayout(head)
 
@@ -1372,6 +1928,7 @@ class MainWindow(QWidget):
         self.atom_box_lay.setContentsMargins(18, 2, 18, 4)
         self.atom_box_lay.setSpacing(4)
         card.layout().addWidget(self.atom_box)
+        self._section_widgets["atom"].append(self.atom_box)
 
         add_row = QHBoxLayout()
         add_row.setContentsMargins(18, 2, 18, 14)
@@ -1385,6 +1942,9 @@ class MainWindow(QWidget):
         add_row.addWidget(add_btn)
         add_row.addStretch(1)
         card.layout().addLayout(add_row)
+        self._section_widgets["atom"].extend([self.element_combo, add_btn])
+        self.apply_atom_style_var.toggled.connect(
+            lambda c: self._set_group_enabled("atom", c))
 
         # ⑥ 图例页
         self._section_label("⑥  图例页（原子 ball + label）")
@@ -1450,6 +2010,7 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "提示", "请输入一个有效的文件夹路径。")
             return
         self.root_path = Path(root)
+        self._apply_root_defaults(self.root_path)
         self.file_table.setSortingEnabled(False)
         self.file_table.setRowCount(0)
         if self.radio_vesta.isChecked():
@@ -1576,16 +2137,31 @@ class MainWindow(QWidget):
     def _refresh_elements(self):
         self._populate_atoms(self._collect_elements_from_checked())
 
+    def _mark_out_dir_touched(self):
+        self._out_dir_touched = True
+
+    def _mark_ppt_touched(self):
+        self._ppt_touched = True
+
+    def _apply_root_defaults(self, root: Path) -> None:
+        """结构根目录确定后：输出目录默认与其一致，PPT 默认放在其中。"""
+        if not self._out_dir_touched:
+            self.out_dir.setText(str(root))
+        if not self._ppt_touched:
+            self.ppt_path.setText(str(root / "structures.pptx"))
+
     def _browse_outdir(self):
         d = QFileDialog.getExistingDirectory(self, "选择输出目录")
         if d:
             self.out_dir.setText(d)
+            self._out_dir_touched = True
 
     def _browse_ppt(self):
         p, _ = QFileDialog.getSaveFileName(
             self, "选择 PPT 保存路径", self.ppt_path.text(), "PowerPoint (*.pptx)")
         if p:
             self.ppt_path.setText(p)
+            self._ppt_touched = True
 
     def _browse_vesta(self):
         p, _ = QFileDialog.getOpenFileName(
@@ -1619,7 +2195,7 @@ class MainWindow(QWidget):
         sw = QPushButton()
         sw.setFixedSize(28, 28)
         sw.setCursor(Qt.PointingHandCursor)
-        sw.setToolTip("点击打开色轮选择颜色")
+        sw.setToolTip("点击打开取色弹窗（色轮 / 配色方案）")
 
         def _cur_qcolor():
             t = c.text().strip()
@@ -1639,9 +2215,9 @@ class MainWindow(QWidget):
                 "QPushButton:hover{border:1px solid #0A84FF;}")
 
         def pick_color():
-            chosen = QColorDialog.getColor(_cur_qcolor(), self, "选择原子颜色")
-            if chosen.isValid():
-                c.setText(chosen.name().upper())
+            dlg = ColorPickerDialog(_cur_qcolor(), element=(e.text().strip() or el), parent=self)
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                c.setText(dlg.color().name().upper())
 
         sw.clicked.connect(pick_color)
         c.textChanged.connect(refresh_swatch)
