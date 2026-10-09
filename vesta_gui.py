@@ -210,7 +210,14 @@ def parse_contcar_elements(path) -> list:
 
 
 def make_ball_png(rgb, path: Path, size: int = 256):
-    """用 PIL 生成带高光/明暗的 3D 球体 PNG（透明背景）。"""
+    """用 PIL 生成与 VESTA 渲染风格一致的原子球 PNG（透明背景）。
+
+    参数按 VESTA 实际渲染的球体标定：
+    - 球体带约 46/255 的白色环境项（VESTA 原子球固有的浅灰底）；
+    - 明暗因子约 0.45~0.80；
+    - 柔和高光。
+    这样图例球体与结构图中 VESTA 渲染的原子球外观一致。
+    """
     if Image is None or np is None:
         return None
     r, g, b = [int(c) for c in rgb]
@@ -236,9 +243,13 @@ def make_ball_png(rgb, path: Path, size: int = 256):
     spec = np.clip(hx / hn * Sd[0] + hy / hn * Sd[1] + hz / hn * Sd[2], 0, 1) ** 28
 
     col = np.zeros((S, S, 4), dtype=np.float64)
-    col[..., 0] = np.clip(r * (0.30 + 0.70 * diff) + 255 * spec, 0, 255)
-    col[..., 1] = np.clip(g * (0.30 + 0.70 * diff) + 255 * spec, 0, 255)
-    col[..., 2] = np.clip(b * (0.30 + 0.70 * diff) + 255 * spec, 0, 255)
+    # 与 VESTA 原子球对齐：环境白光 + 明暗 + 柔和高光
+    amb_w = 0.18            # 约 46 的白色环境项
+    shade = 0.45 + 0.35 * diff
+    spec_k = 0.42
+    col[..., 0] = np.clip(r * shade + 255 * amb_w + 255 * spec * spec_k, 0, 255)
+    col[..., 1] = np.clip(g * shade + 255 * amb_w + 255 * spec * spec_k, 0, 255)
+    col[..., 2] = np.clip(b * shade + 255 * amb_w + 255 * spec * spec_k, 0, 255)
 
     aa = np.clip((1.0 - np.sqrt(np.minimum(d2, 1.0))) * R * 1.5, 0.0, 1.0)
     col[..., 3] = inside * aa * 255
@@ -577,16 +588,25 @@ def run_batch(s, log, progress, stop_event, pause_event=None):
         log("info", f"PPT 路径：{pptx_path}")
         log("info", f"共 {len(s['files'])} 个结构文件。")
 
-        top_mat = view_matrix(TOP, s["rot_x"], s["rot_y"], s["rot_z"])
-        side_mat = view_matrix(SIDE_A if s["side_dir"] == "沿 a 轴看" else SIDE_B,
-                               s["rot_x"], s["rot_y"], s["rot_z"])
+        apply_view = bool(s.get("apply_view", True))
+        apply_display = bool(s.get("apply_display", True))
 
-        base_modify = {
-            "comps": s["comps"], "ucolp": s["ucolp"], "sbond": s["sbond"],
-            "sbond_padding": s["sbond_padding"],
-        }
-        if s["boundary"]:
-            base_modify["boundary"] = s["boundary"]
+        if apply_view:
+            top_mat = view_matrix(TOP, s["rot_x"], s["rot_y"], s["rot_z"])
+            side_mat = view_matrix(SIDE_A if s["side_dir"] == "沿 a 轴看" else SIDE_B,
+                                   s["rot_x"], s["rot_y"], s["rot_z"])
+        else:
+            top_mat = view_matrix(TOP)
+            side_mat = view_matrix(SIDE_A if s["side_dir"] == "沿 a 轴看" else SIDE_B)
+
+        base_modify = {}
+        if apply_display:
+            base_modify = {
+                "comps": s["comps"], "ucolp": s["ucolp"], "sbond": s["sbond"],
+                "sbond_padding": s["sbond_padding"],
+            }
+            if s["boundary"]:
+                base_modify["boundary"] = s["boundary"]
         if s["atom_params"]:
             base_modify["atom_params"] = s["atom_params"]
 
@@ -644,18 +664,26 @@ def run_batch(s, log, progress, stop_event, pause_event=None):
                 fit_mode = s.get("model_fit", "crop")   # crop / zoom / both
 
                 def process_view(vf, img, mat):
-                    """导出并让模型在图片中约占 target（VESTA 缩放 / 裁剪 或两者）。"""
-                    base_frac = float(s["scale_frac"]) or 1.0
-                    v.modify_vesta(vf, version=mat, x_move_frac=s["x_move"],
-                                   y_move_frac=s["y_move"], scale_frac=base_frac)
+                    """导出并让模型在图片中约占 target（VESTA 缩放 / 裁剪 或两者）。
+
+                    注意：处理开关只决定是否套用 .vesta 修改（旋转 / 显示选项 / 场景缩放），
+                    图片导出与自适应裁剪属于出图步骤，始终执行，绝不受开关影响。
+                    """
+                    if apply_display:
+                        base_frac = float(s["scale_frac"]) or 1.0
+                        x_move, y_move = s["x_move"], s["y_move"]
+                    else:
+                        base_frac, x_move, y_move = 1.0, 0.0, 0.0
+                    v.modify_vesta(vf, version=mat, x_move_frac=x_move,
+                                   y_move_frac=y_move, scale_frac=base_frac)
                     v.export_image(vf, img, scale=s["scale"])
                     if fit_mode in ("zoom", "both"):
                         f = model_fraction(img)
                         if f and f > 1e-6:
                             new_frac = max(0.05, min(50.0, base_frac * target / f))
                             if abs(new_frac - base_frac) > 0.02 * base_frac:
-                                v.modify_vesta(vf, version=mat, x_move_frac=s["x_move"],
-                                               y_move_frac=s["y_move"], scale_frac=new_frac)
+                                v.modify_vesta(vf, version=mat, x_move_frac=x_move,
+                                               y_move_frac=y_move, scale_frac=new_frac)
                                 v.export_image(vf, img, scale=s["scale"])
                     if fit_mode in ("crop", "both"):
                         fit_model_in_image(img, target)
@@ -1267,6 +1295,7 @@ class MainWindow(QWidget):
         # ③ 视图设置
         self._section_label("③  视图设置")
         card = self._card("俯视图 / 侧视图")
+        self._row(card, "启用视图设置处理", self._toggle(True, "apply_view_var"))
         self._row(card, "生成俯视图（沿 c 轴）", self._toggle(True, "do_top_var"))
         self._row(card, "生成侧视图（c 轴竖直）", self._toggle(True, "do_side_var"))
         self._row(card, "侧视方向", self._combo(["沿 b 轴看", "沿 a 轴看"], 130, "side_dir_var"))
@@ -1283,6 +1312,7 @@ class MainWindow(QWidget):
         # ④ VESTA 显示
         self._section_label("④  VESTA 显示选项")
         card = self._card("结构显示（对应 .vesta 各段）")
+        self._row(card, "启用 VESTA 显示选项处理", self._toggle(True, "apply_display_var"))
         self._row(card, "显示晶胞坐标轴 COMPS", self._toggle(False, "comps_var"))
         self._row(card, "显示晶胞边界 UCOLP", self._toggle(True, "ucolp_var"))
         self._row(card, "生成化学键 SBOND", self._toggle(True, "sbond_var"))
@@ -1802,6 +1832,8 @@ class MainWindow(QWidget):
             "hide_window": self.hide_window_var.isChecked(),
             "keep_vesta": self.keep_vesta_var.isChecked(),
             "vesta_exe": self.vesta_exe_var.text().strip(),
+            "apply_view": self.apply_view_var.isChecked(),
+            "apply_display": self.apply_display_var.isChecked(),
             "do_top": self.do_top_var.isChecked(),
             "do_side": self.do_side_var.isChecked(),
             "side_dir": self.side_dir_var.currentText(),
